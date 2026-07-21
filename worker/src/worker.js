@@ -1,8 +1,11 @@
 const GEMINI_HTTP = 'https://generativelanguage.googleapis.com';
 const GEMINI_LIVE = 'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const SARVAM_TTS_HTTP = 'https://api.sarvam.ai/text-to-speech';
 const DEFAULT_LIVE_MODEL = 'gemini-3.5-live-translate-preview';
 const DEFAULT_TEXT_MODEL = 'gemini-2.5-pro';
 const DEFAULT_TTS_MODEL = 'gemini-2.5-pro-preview-tts';
+const DEFAULT_SARVAM_TTS_MODEL = 'bulbul:v3';
+const LIVE_TTS_CHARACTER_LIMIT = 420;
 const TTS_SAMPLES = Object.freeze({
   'first-scene-ta': {
     voice: 'Kore',
@@ -53,7 +56,9 @@ export default {
           textModel: env.TEXT_MODEL || DEFAULT_TEXT_MODEL,
           recordedAudioTranscriptionModel: env.TEXT_MODEL || DEFAULT_TEXT_MODEL,
           ttsModel: env.TTS_MODEL || DEFAULT_TTS_MODEL,
+          liveVoiceModel: env.SARVAM_TTS_MODEL || DEFAULT_SARVAM_TTS_MODEL,
           apiKeyBindingConfigured: Boolean(env.GEMINI_API_KEY),
+          liveVoiceKeyConfigured: Boolean(env.SARVAM_API_KEY),
           incidentDatabaseConfigured: Boolean(env.DB)
         }, 200, cors);
       }
@@ -63,21 +68,28 @@ export default {
       const isBrief = url.pathname === '/text/brief' && request.method === 'POST';
       const isTranscribe = url.pathname === '/text/transcribe' && request.method === 'POST';
       const isTts = url.pathname === '/tts/sample' && request.method === 'POST';
+      const isLiveTts = url.pathname === '/tts/live' && request.method === 'POST';
       const isLive = url.pathname === '/live' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
       const isIncidentStream = url.pathname === '/agent/incident-stream' && request.method === 'GET';
       const incidentMatch = url.pathname.match(/^\/data\/incidents\/([A-Z0-9-]+)$/);
       const isIncidentList = url.pathname === '/data/incidents' && request.method === 'GET';
       const isIncidentDetail = Boolean(incidentMatch) && request.method === 'GET';
       const isData = isIncidentList || isIncidentDetail;
-      if (!isBrief && !isTranscribe && !isTts && !isLive && !isIncidentStream && !isData) return json({ error: 'not found' }, 404, cors);
+      if (!isBrief && !isTranscribe && !isTts && !isLiveTts && !isLive && !isIncidentStream && !isData) return json({ error: 'not found' }, 404, cors);
 
       const actorKey = request.headers.get('CF-Connecting-IP') || 'unknown-client';
-      const limiter = isLive ? env.LIVE_RATE_LIMITER : isTts ? env.TTS_RATE_LIMITER : isTranscribe ? env.STT_RATE_LIMITER : isData ? env.DATA_RATE_LIMITER : env.TEXT_RATE_LIMITER;
+      const limiter = isLive ? env.LIVE_RATE_LIMITER : (isTts || isLiveTts) ? env.TTS_RATE_LIMITER : isTranscribe ? env.STT_RATE_LIMITER : isData ? env.DATA_RATE_LIMITER : env.TEXT_RATE_LIMITER;
       const { success } = await limiter.limit({ key: `${url.pathname}:${actorKey}` });
       if (!success) return json({ error: 'rate limit exceeded; retry shortly' }, 429, cors);
 
       if (isIncidentList) return listIncidents(env, cors);
       if (isIncidentDetail) return getIncidentContext(env, cors, incidentMatch[1]);
+
+      if (isLiveTts) {
+        const sarvamApiKey = await readSecret(env.SARVAM_API_KEY);
+        if (!sarvamApiKey) return json({ error: 'SARVAM_API_KEY is not configured' }, 503, cors);
+        return createLiveVoice(request, env, cors, sarvamApiKey);
+      }
 
       const geminiApiKey = await readGeminiApiKey(env);
       if (!geminiApiKey) return json({ error: 'GEMINI_API_KEY is not configured' }, 503, cors);
@@ -91,7 +103,8 @@ export default {
       }
 
       if (isIncidentStream) {
-        return await streamIncidentResponse(url, env, cors, geminiApiKey, ctx, request.signal);
+        const sarvamApiKey = await readSecret(env.SARVAM_API_KEY);
+        return await streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx, request.signal);
       }
 
       if (isTts) {
@@ -218,6 +231,40 @@ async function createSampleAudio(request, env, cors, geminiApiKey, ctx) {
   });
   ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
   return response;
+}
+
+async function createLiveVoice(request, env, cors, sarvamApiKey) {
+  const contentLength = Number(request.headers.get('content-length') || 0);
+  if (contentLength > 2_000) return json({ error: 'request too large' }, 413, cors);
+
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'invalid JSON' }, 400, cors); }
+  const text = clean(body.text || '', LIVE_TTS_CHARACTER_LIMIT + 1);
+  if (!text) return json({ error: 'text is required' }, 400, cors);
+  if (text.length > LIVE_TTS_CHARACTER_LIMIT) {
+    return json({ error: `live voice text cannot exceed ${LIVE_TTS_CHARACTER_LIMIT} characters` }, 400, cors);
+  }
+  const languageCode = body.languageCode === 'en-IN' ? 'en-IN' : body.languageCode === 'ta-IN' ? 'ta-IN' : '';
+  if (!languageCode) return json({ error: 'languageCode must be ta-IN or en-IN' }, 400, cors);
+  const voiceGender = body.voiceGender === 'male' ? 'male' : 'female';
+
+  try {
+    const wav = await synthesizeLiveVoice({ text, languageCode, voiceGender }, env, sarvamApiKey);
+    return new Response(wav, {
+      headers: {
+        ...cors,
+        'Content-Type': 'audio/wav',
+        'Cache-Control': 'no-store',
+        'Content-Disposition': 'inline; filename="live-radio.wav"',
+        'X-UECP-Audio-Characters': String(text.length)
+      }
+    });
+  } catch (error) {
+    const status = Number(error?.status) || 502;
+    const detail = clean(error instanceof Error ? error.message : String(error), 260);
+    console.error(JSON.stringify({ message: 'live voice request failed', status, languageCode, characters: text.length, detail }));
+    return json({ error: detail || 'live voice request failed' }, status >= 400 && status < 600 ? status : 502, cors);
+  }
 }
 
 async function createBrief(request, env, cors, geminiApiKey) {
@@ -403,7 +450,7 @@ async function openLiveTranslation(request, env, geminiApiKey) {
   return new Response(null, { status: 101, webSocket: client });
 }
 
-function streamIncidentResponse(url, env, cors, geminiApiKey, ctx, signal) {
+function streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx, signal) {
   const incidentId = clean(url.searchParams.get('incidentId') || 'INC-0431', 40);
   if (!/^INC-[A-Z0-9-]+$/.test(incidentId)) return json({ error: 'invalid incident id' }, 400, cors);
   const encoder = new TextEncoder();
@@ -454,12 +501,13 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, ctx, signal) {
         if (update.voiceRequired) {
           await send('status', { runId, stage: 'voice', label: `Rendering ${update.unit} radio audio`, messageId: update.id });
           try {
-            const audio = await createSpontaneousVoice(update, env, geminiApiKey);
+            if (!sarvamApiKey) throw new Error('Live voice is not configured: SARVAM_API_KEY is missing.');
+            const audio = await createSpontaneousVoice(update, env, sarvamApiKey);
             await send('audio', { runId, messageId: update.id, languageCode: update.languageCode, ...audio });
           } catch (error) {
             console.warn(JSON.stringify({ message: 'incident voice skipped', runId, messageId: update.id, error: error instanceof Error ? error.message : String(error) }));
             update.voiceRequired = false;
-            await send('voice-error', { runId, messageId: update.id, error: 'Fresh radio voice was unavailable; live text coordination continues.' });
+            await send('voice-error', { runId, messageId: update.id, error: clean(error instanceof Error ? error.message : String(error), 260) });
           }
         }
         await waitForNextTurn(1400, signal);
@@ -621,34 +669,45 @@ function waitForNextTurn(milliseconds, signal) {
   });
 }
 
-async function createSpontaneousVoice(update, env, geminiApiKey) {
-  const style = update.voice === 'Kore' ? 'a composed female Indian emergency dispatcher' : 'a calm male Chennai field responder';
-  const payload = {
-    model: env.TTS_MODEL || DEFAULT_TTS_MODEL,
-    input: `Speak as ${style} over an operational radio channel. Use concise, controlled cadence. Speak only this ${update.languageCode === 'ta-IN' ? 'Tamil' : 'English'} message: ${update.message}`,
-    response_format: { type: 'audio' },
-    generation_config: { speech_config: [{ voice: update.voice }] }
-  };
-  let upstream;
-  let data;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    upstream = await fetch(`${GEMINI_HTTP}/v1beta/interactions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey, 'Api-Revision': '2026-05-20' },
-      body: JSON.stringify(payload)
-    });
-    data = await upstream.json();
-    if (upstream.ok || (upstream.status !== 429 && upstream.status < 500)) break;
-  }
-  if (!upstream.ok) throw new Error(`voice generation failed (${upstream.status})`);
-  const audio = data?.output_audio || data?.steps
-    ?.filter(step => step.type === 'model_output')
-    .flatMap(step => step.content || [])
-    .find(content => content.type === 'audio' && content.data);
-  if (!audio) throw new Error('voice generation returned no audio');
-  const decoded = decodeBase64(audio.data);
-  const wav = audio.mime_type === 'audio/wav' ? decoded : makeWav(decoded, Number(audio.sample_rate) || 24000, Number(audio.channels) || 1);
+async function createSpontaneousVoice(update, env, sarvamApiKey) {
+  const voiceGender = update.voice === 'Kore' ? 'female' : 'male';
+  const wav = await synthesizeLiveVoice({
+    text: clean(update.message || '', LIVE_TTS_CHARACTER_LIMIT),
+    languageCode: update.languageCode === 'ta-IN' ? 'ta-IN' : 'en-IN',
+    voiceGender
+  }, env, sarvamApiKey);
   return { audioBase64: encodeBase64(wav.buffer), mimeType: 'audio/wav' };
+}
+
+async function synthesizeLiveVoice({ text, languageCode, voiceGender }, env, sarvamApiKey) {
+  if (!text) throw new Error('Live voice received an empty message.');
+  const speaker = voiceGender === 'male' ? 'ratan' : 'priya';
+  const payload = {
+    text,
+    target_language_code: languageCode,
+    speaker,
+    pace: 1.08,
+    speech_sample_rate: 24000,
+    model: env.SARVAM_TTS_MODEL || DEFAULT_SARVAM_TTS_MODEL,
+    output_audio_codec: 'wav',
+    temperature: 0.55
+  };
+  const upstream = await fetch(SARVAM_TTS_HTTP, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'api-subscription-key': sarvamApiKey },
+    body: JSON.stringify(payload)
+  });
+  let data;
+  try { data = await upstream.json(); } catch { data = null; }
+  if (!upstream.ok) {
+    const detail = clean(data?.error?.message || data?.message || data?.detail || 'upstream voice service returned no detail', 200);
+    const error = new Error(`Live voice generation failed (${upstream.status}): ${detail}`);
+    error.status = upstream.status;
+    throw error;
+  }
+  const encodedAudio = data?.audios?.[0];
+  if (!encodedAudio) throw new Error('Live voice generation succeeded but returned no audio.');
+  return decodeBase64(encodedAudio);
 }
 
 function isAllowedOrigin(origin, env) {
@@ -726,7 +785,11 @@ function clean(value, maxLength) {
 }
 
 async function readGeminiApiKey(env) {
-  if (!env.GEMINI_API_KEY) return '';
-  if (typeof env.GEMINI_API_KEY === 'string') return env.GEMINI_API_KEY;
-  return env.GEMINI_API_KEY.get();
+  return readSecret(env.GEMINI_API_KEY);
+}
+
+async function readSecret(binding) {
+  if (!binding) return '';
+  if (typeof binding === 'string') return binding;
+  return binding.get();
 }

@@ -29,7 +29,7 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-The Worker binds the existing account-level `GEMINI_API_KEY` from Cloudflare Secrets Store; the key is not stored in this repository. `ALLOWED_ORIGINS` in `worker/wrangler.jsonc` is restricted to the GitHub Pages origin.
+The Worker binds the existing account-level `GEMINI_API_KEY` and `SARVAM_API_KEY` from Cloudflare Secrets Store; neither key is stored in this repository. `ALLOWED_ORIGINS` in `worker/wrangler.jsonc` is restricted to the GitHub Pages origin.
 
 The Worker exposes:
 
@@ -39,6 +39,7 @@ The Worker exposes:
 - `POST /text/brief` — incident brief generation using `gemini-2.5-pro`.
 - `POST /text/transcribe` — short Tamil/English audio transcription and English translation using `gemini-2.5-pro`.
 - `POST /tts/sample` — Tamil and English operational speech using `gemini-2.5-pro-preview-tts`.
+- `POST /tts/live` — fresh Tamil or Indian-English operational WAV speech through the secure Worker. Requests are capped at 420 characters and are never retried automatically.
 - `WS /live` — key-protected Gemini Live relay enforcing `gemini-3.5-live-translate-preview` and configured translation languages.
 
 Cloudflare Rate Limiting bindings protect text, TTS and live-session routes. A production rollout still requires UECP user authentication, formal quota policy and state data-localisation controls.
