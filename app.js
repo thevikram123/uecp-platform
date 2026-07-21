@@ -125,6 +125,10 @@ const state = {
   pttStream: null,
   pttChunks: [],
   pttStopRequested: false,
+  gisMap: null,
+  gisTileLayer: null,
+  gisLayers: {},
+  gisBase: 'light',
   nextAudioTime: 0,
   transcriptIn: '',
   transcriptOut: ''
@@ -178,13 +182,105 @@ function renderOverview() {
       <section class="panel"><div class="panel-head"><div><h3>Active incident board</h3><p>Cross-agency events ranked by operational priority</p></div><button class="panel-action" data-view-link="incidents">Open command view →</button></div><div class="incident-list">${incidents.map(incidentRow).join('')}</div>
         <div class="health-grid"><div class="health-cell"><p>ERSS 112 CAD</p><strong>Healthy</strong><small>34 ms event latency</small></div><div class="health-cell"><p>ICCC feeds</p><strong>12 / 12</strong><small>Video links available</small></div><div class="health-cell"><p>RoIP gateways</p><strong>98.3%</strong><small>2 maintenance windows</small></div><div class="health-cell"><p>Evidence sync</p><strong>Current</strong><small>0 items pending</small></div></div>
       </section>
-      <section class="panel"><div class="panel-head"><div><h3>Chennai live picture</h3><p>ICCC + ERSS incident locations</p></div><button class="panel-action" data-action="map-fullscreen">Expand</button></div><div class="mini-map"><div class="map-grid"></div><i class="road r1"></i><i class="road r2"></i><span class="map-pin p1">${icon('alert',13)}</span><span class="map-label l1">INC-0431 · COLLISION</span><span class="map-pin p2">${icon('alert',13)}</span><span class="map-label l2">INC-0428 · ROAD</span><span class="map-pin p3">${icon('truck',13)}</span></div></section>
+      <section class="panel gis-panel" id="gisPanel"><div class="panel-head"><div><h3>Chennai live picture</h3><p>GIS · ICCC · ERSS · live field resources</p></div><button class="panel-action" data-action="map-fullscreen">Expand</button></div><div class="gis-map-shell"><div id="chennaiLiveMap" class="chennai-live-map" aria-label="Interactive Chennai incident and responder map"></div><div class="gis-live-badge"><i></i><span>LIVE</span><b>CHENNAI · 3 INCIDENTS</b></div><div class="gis-layer-panel"><span>OPERATIONAL LAYERS</span><div><button class="active" data-gis-layer="incidents">Incidents</button><button class="active" data-gis-layer="resources">Units</button><button class="active" data-gis-layer="zones">Hot zone</button><button class="active" data-gis-layer="cameras">CCTV</button></div><div class="gis-basemap"><button class="active" data-gis-base="light">Light GIS</button><button data-gis-base="satellite">Satellite</button></div></div><div class="gis-incident-hud"><span>PRIORITY INCIDENT</span><strong>INC-0431 · GUINDY</strong><small>Vehicle fire · 50 m hot zone · southbound closure</small><div><b>21</b> responders <b>6</b> agencies</div></div></div></section>
     </div>
     <div class="dashboard-grid">
       <section class="panel"><div class="panel-head"><div><h3>AI communications brief</h3><p>Gemini 3.1 Flash-Lite · sources remain linked for verification</p></div><button class="button secondary" data-action="refresh-brief">${icon('refresh')} Regenerate brief</button></div><div class="timeline" id="briefPanel"><div class="timeline-item"><span class="timeline-time">14:49</span><div class="timeline-copy"><strong>Guindy collision and vehicle fire remains the priority incident.</strong><p>Fire suppression, trauma triage and full southbound diversion are active. Two red-priority patients reported; lorry cargo status remains unverified. NHAI barriers and spill control ETA is six minutes.</p></div></div><div class="timeline-item"><span class="timeline-time">14:42</span><div class="timeline-copy"><strong>Saidapet bridge traffic diverted.</strong><p>ICCC congestion score has reduced 19%. TANGEDCO isolation team ETA is 8 minutes.</p></div></div></div></section>
       <section class="panel"><div class="panel-head"><div><h3>Reachability exceptions</h3><p>Concierge is watching these escalation chains</p></div></div><div class="responder-list"><div class="responder-row"><span class="avatar">LD</span><div><strong>PC L. Devi · Beat 22</strong><small>Unreachable 12 min · escalated to SHO</small></div><span class="radio-chip">AUTO</span></div><div class="responder-row"><span class="avatar">R3</span><div><strong>Rescue Tender 03</strong><small>Radio-only · DMR text delivered</small></div><span class="radio-chip">DMR</span></div><div class="responder-row"><span class="avatar">EB</span><div><strong>TANGEDCO duty engineer</strong><small>Voice brief queued after current call</small></div><span class="radio-chip">SIP</span></div></div></section>
     </div>
   </section>`;
+}
+
+function initChennaiMap() {
+  const container=document.querySelector('#chennaiLiveMap');
+  if(!container)return;
+  if(!window.L){container.innerHTML='<div class="gis-map-fallback"><strong>GIS basemap unavailable</strong><span>Incident and resource data remain available in the command view.</span></div>';return;}
+
+  const L=window.L;
+  const map=L.map(container,{zoomControl:true,attributionControl:true,zoomSnap:.5,minZoom:10,maxZoom:19}).setView([13.0285,80.2237],12.5);
+  state.gisMap=map;
+  setGisBase(state.gisBase);
+  L.control.scale({imperial:false,position:'bottomright'}).addTo(map);
+
+  const operationalIcon=(label,kind,size=30)=>L.divIcon({
+    className:'gis-div-icon',
+    html:`<span class="gis-marker ${kind}">${label}</span>`,
+    iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-size/2]
+  });
+  const incidentPopup=(id,title,status,detail)=>`<div class="gis-popup"><span>${id} · ${status}</span><strong>${title}</strong><p>${detail}</p><button onclick="location.hash='incidents'">Open command view</button></div>`;
+  const unitPopup=(agency,callsign,status,detail)=>`<div class="gis-popup"><span>${agency} · ${status}</span><strong>${callsign}</strong><p>${detail}</p></div>`;
+
+  const incidentLayer=L.layerGroup();
+  L.marker([13.0067,80.2206],{icon:operationalIcon('!', 'critical',34),zIndexOffset:1000})
+    .bindTooltip('INC-0431 · VEHICLE FIRE',{permanent:true,direction:'right',className:'gis-priority-label',offset:[12,0]})
+    .bindPopup(incidentPopup('INC-0431','Guindy multi-vehicle collision','CRITICAL','Car fire, fuel spill, two red-priority patients. Southbound GST Road closed.'))
+    .addTo(incidentLayer);
+  L.marker([13.0239,80.2284],{icon:operationalIcon('R','high')})
+    .bindPopup(incidentPopup('INC-0428','Saidapet road collapse','HIGH','Police, disaster management and TANGEDCO response active.'))
+    .addTo(incidentLayer);
+  L.marker([13.0696,80.2066],{icon:operationalIcon('C','medium')})
+    .bindPopup(incidentPopup('INC-0426','CMBT crowd congestion','MEDIUM','ICCC crowd monitoring with police and traffic units.'))
+    .addTo(incidentLayer);
+
+  const resourceLayer=L.layerGroup();
+  [
+    [[13.0080,80.2192],'P','Police','PRV-114','ON SCENE','First-on-scene unit maintaining the 50 m cordon.'],
+    [[13.0052,80.2167],'F','Fire & Rescue','FIRE-TN-3','SUPPRESSION','Rescue tender positioned upwind; fire knockdown active.'],
+    [[13.0104,80.2227],'108','EMRI 108','AMB-2291','TRIAGE','Triage point established north of the hot zone.'],
+    [[13.0151,80.2209],'T','Traffic','TRF-CEN-5','DIVERSION','Southbound closure and emergency shoulder corridor active.'],
+    [[12.9988,80.2180],'N','NHAI','PATROL-6','EN ROUTE','Barriers and spill-control vehicle approaching from the south.']
+  ].forEach(([position,label,agency,callsign,status,detail])=>L.marker(position,{icon:operationalIcon(label,'resource',label==='108'?34:30)})
+    .bindPopup(unitPopup(agency,callsign,status,detail)).addTo(resourceLayer));
+
+  const zoneLayer=L.layerGroup();
+  L.circle([13.0067,80.2206],{radius:50,color:'#d92d20',weight:2,fillColor:'#d92d20',fillOpacity:.14,dashArray:'5 4'})
+    .bindTooltip('50 m fire hot zone').addTo(zoneLayer);
+  L.polygon([[13.00635,80.2202],[13.00655,80.2209],[13.0061,80.2211]],{color:'#d92d20',weight:1,fillColor:'#ffe600',fillOpacity:.48})
+    .bindTooltip('Reported fuel spill · unverified extent').addTo(zoneLayer);
+  const corridor=[[13.0160,80.2218],[13.0128,80.2213],[13.0096,80.2209],[13.0068,80.2206],[13.0022,80.2196]];
+  L.polyline(corridor,{color:'#ffe600',weight:9,opacity:.92}).bindTooltip('Emergency response corridor').addTo(zoneLayer);
+  L.polyline(corridor,{color:'#111',weight:2,dashArray:'8 7',opacity:.8}).addTo(zoneLayer);
+  L.polyline([[13.0182,80.2219],[13.0134,80.2213],[13.0070,80.2205]],{color:'#d92d20',weight:4,dashArray:'3 7',opacity:.85})
+    .bindTooltip('GST Road southbound closed').addTo(zoneLayer);
+
+  const cameraLayer=L.layerGroup();
+  [
+    [[13.0075,80.2211],'G24','ICCC Camera G-24','Live incident approach · queue and cordon visible'],
+    [[13.0132,80.2219],'G19','ICCC Camera G-19','Diversion junction · southbound closure visible'],
+    [[13.0229,80.2280],'S12','ICCC Camera S-12','Saidapet bridge monitoring feed']
+  ].forEach(([position,label,title,detail])=>L.marker(position,{icon:operationalIcon(label,'camera',32)})
+    .bindPopup(unitPopup('ICCC',title,'LIVE',detail)).addTo(cameraLayer));
+
+  state.gisLayers={incidents:incidentLayer,resources:resourceLayer,zones:zoneLayer,cameras:cameraLayer};
+  Object.values(state.gisLayers).forEach(layer=>layer.addTo(map));
+  setTimeout(()=>map.invalidateSize(),120);
+}
+
+function setGisBase(base) {
+  state.gisBase=base==='satellite'?'satellite':'light';
+  document.querySelectorAll('[data-gis-base]').forEach(button=>button.classList.toggle('active',button.dataset.gisBase===state.gisBase));
+  if(!state.gisMap||!window.L)return;
+  if(state.gisTileLayer)state.gisMap.removeLayer(state.gisTileLayer);
+  const config=state.gisBase==='satellite'
+    ? {url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',options:{attribution:'Tiles © Esri',maxZoom:19}}
+    : {url:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',options:{attribution:'© OpenStreetMap contributors · © CARTO',subdomains:'abcd',maxZoom:20}};
+  state.gisTileLayer=window.L.tileLayer(config.url,config.options).addTo(state.gisMap);
+  state.gisTileLayer.bringToBack();
+}
+
+function toggleGisLayer(button) {
+  const layer=state.gisLayers[button.dataset.gisLayer]; if(!layer||!state.gisMap)return;
+  const visible=state.gisMap.hasLayer(layer);
+  if(visible)state.gisMap.removeLayer(layer);else layer.addTo(state.gisMap);
+  button.classList.toggle('active',!visible);
+}
+
+function toggleMapFullscreen(button) {
+  const panel=document.querySelector('#gisPanel'); if(!panel)return;
+  const expanded=panel.classList.toggle('expanded');
+  button.textContent=expanded?'Collapse':'Expand';
+  document.body.classList.toggle('gis-expanded',expanded);
+  setTimeout(()=>state.gisMap?.invalidateSize(),180);
 }
 
 function renderDirectory() {
@@ -274,12 +370,15 @@ function renderAudit() {
 }
 
 function render() {
+  if(state.gisMap){state.gisMap.remove();state.gisMap=null;state.gisTileLayer=null;state.gisLayers={};}
+  document.body.classList.remove('gis-expanded');
   const [eye, title] = titles[state.view] || titles.overview;
   eyebrow.textContent = eye; pageTitle.textContent = title;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === state.view));
   const views = { overview:renderOverview, directory:renderDirectory, incidents:renderIncidents, comms:renderComms, translate:renderTranslate, integrations:renderIntegrations, audit:renderAudit };
   viewRoot.innerHTML = (views[state.view] || renderOverview)();
   bindViewEvents();
+  if(state.view==='overview')requestAnimationFrame(initChennaiMap);
   window.scrollTo({top:0, behavior:'smooth'});
 }
 
@@ -299,6 +398,8 @@ function bindViewEvents() {
   viewRoot.querySelectorAll('[data-action]').forEach(b => b.onclick = () => handleAction(b.dataset.action, b));
   const ds = document.querySelector('#directorySearch'); if (ds) ds.oninput = e => { state.query = e.target.value; clearTimeout(ds._t); ds._t=setTimeout(render,160); };
   const messageInput = document.querySelector('#messageInput'); if (messageInput) messageInput.onkeydown = e => { if (e.key==='Enter') sendMessage(); };
+  viewRoot.querySelectorAll('[data-gis-layer]').forEach(button=>button.onclick=()=>toggleGisLayer(button));
+  viewRoot.querySelectorAll('[data-gis-base]').forEach(button=>button.onclick=()=>setGisBase(button.dataset.gisBase));
   bindPtt();
   const mic = document.querySelector('#translateMic'); if (mic) mic.onclick = toggleTranslation;
 }
@@ -319,7 +420,7 @@ function handleAction(action, button) {
     'verify-chain': () => toast('Evidence hash chain verified · no integrity exceptions'),
     'refresh-integrations': () => toast('All six integration adapters are healthy'),
     'share-directory': () => copyText(location.href.split('#')[0]+'#directory','Duty roster link copied'),
-    'map-fullscreen': () => toast('ICCC map view expanded for command wall'),
+    'map-fullscreen': () => toggleMapFullscreen(button),
     'new-group': () => toast('New group workflow ready · select members by jurisdiction'),
     'call': () => toast('Secure group call started · ringing 21 members'),
     'play-sample': () => playSyntheticSample(button),
