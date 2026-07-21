@@ -147,6 +147,7 @@ const state = {
   agentStreamAbort: null,
   liveAudio: {},
   liveVoiceTrialUrl: '',
+  liveVoiceTrialSpeaker: '',
   liveVoiceTrialLoading: false,
   showArchivedChat: true,
   liveIncidentStarted: false,
@@ -454,8 +455,9 @@ function renderComms() {
 }
 
 function liveResponsePanel() {
-  const voiceLabel=state.liveVoiceTrialUrl?'Replay fresh Tamil voice':'Generate fresh Tamil voice';
-  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>INCIDENT RESPONSE SAMPLE</b><small>Packaged field recordings plus one newly rendered Tamil radio update per browser session</small></div></div><div class="live-response-actions"><span class="status-tag live">SAMPLE MODE</span><button class="button primary live-voice-trial" data-action="try-live-voice" ${state.liveVoiceTrialLoading?'disabled':''}>${icon(state.liveVoiceTrialUrl?'play':'radio',13)} ${voiceLabel}</button></div></section>`;
+  const voiceLabel=state.liveVoiceTrialUrl?'Generate another Tamil voice':'Generate fresh Tamil voice';
+  const replay=state.liveVoiceTrialUrl?`<button class="button secondary live-voice-trial" data-action="replay-live-voice">${icon('play',13)} Replay</button>`:'';
+  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>INCIDENT RESPONSE SAMPLE</b><small>Packaged field recordings plus rotating male and female Tamil radio voices</small></div></div><div class="live-response-actions"><span class="status-tag live">SAMPLE MODE</span>${replay}<button class="button primary live-voice-trial" data-action="try-live-voice" ${state.liveVoiceTrialLoading?'disabled':''}>${icon('radio',13)} ${voiceLabel}</button></div></section>`;
 }
 
 function currentFireConversation(){return state.showArchivedChat?archivedFireConversation:conversations.fire;}
@@ -581,6 +583,7 @@ function handleAction(action, button) {
     'return-live-session': returnToLiveSession,
     'play-live-audio': () => playLiveAudio(button),
     'try-live-voice': () => tryLiveVoice(button),
+    'replay-live-voice': () => playLiveVoiceTrial(button),
     'refresh-brief': () => refreshBrief(button),
     'export-sitrep': () => downloadText('UECP_SITREP_INC-0431.txt', 'UECP SITUATION REPORT\nINC-0431 · Multi-vehicle collision with vehicle fire\nLocation: GST Road near Guindy flyover\nStatus: Live\nFire suppression, traffic diversion and trauma triage active. Two red-priority patients reported.\nGenerated: '+new Date().toLocaleString('en-IN')),
     'export-audit': () => downloadText('UECP_Audit_Manifest.txt','UECP EVIDENCE MANIFEST\nHash chain: VALID\nObjects: 18,600,000\nExported: '+new Date().toISOString()),
@@ -818,7 +821,6 @@ async function playLiveAudio(button) {
 
 async function tryLiveVoice(button) {
   if(state.liveVoiceTrialLoading)return;
-  if(state.liveVoiceTrialUrl){await playLiveVoiceTrial(button);return;}
   const original=button.innerHTML;
   state.liveVoiceTrialLoading=true;button.disabled=true;button.innerHTML=`${icon('activity',13)} Rendering fresh voice…`;
   const workerUrl=(localStorage.getItem('uecpWorkerUrl')||DEFAULT_WORKER_URL).replace(/\/$/,'');
@@ -829,14 +831,18 @@ async function tryLiveVoice(button) {
       body:JSON.stringify({
         text:'கிண்டி மேம்பாலம் அருகே வாகன தீ கட்டுப்பாட்டில் உள்ளது. தெற்கு வழித்தடத்தை மூடிவைத்து, ஆம்புலன்ஸ் பாதையை திறந்துவைக்கவும்.',
         languageCode:'ta-IN',
-        voiceGender:'female'
+        voiceGender:'any',
+        excludeSpeaker:state.liveVoiceTrialSpeaker
       })
     });
     if(!response.ok){let detail=`HTTP ${response.status}`;try{const data=await response.json();detail=data.error||detail;}catch{}throw new Error(detail);}
     const audioBlob=await response.blob();if(!audioBlob.size)throw new Error('The live voice service returned an empty audio file.');
+    if(state.liveVoiceTrialUrl)URL.revokeObjectURL(state.liveVoiceTrialUrl);
     state.liveVoiceTrialUrl=URL.createObjectURL(audioBlob);
-    button.disabled=false;button.innerHTML=`${icon('play',13)} Replay fresh Tamil voice`;
-    await playLiveVoiceTrial(button);
+    state.liveVoiceTrialSpeaker=response.headers.get('X-UECP-Voice')||'';
+    state.liveVoiceTrialLoading=false;render();
+    const replayButton=document.querySelector('[data-action="replay-live-voice"]');
+    if(replayButton)await playLiveVoiceTrial(replayButton);
   }catch(error){button.disabled=false;button.innerHTML=original;toast(`Fresh Tamil voice failed · ${error.message}`);}
   finally{state.liveVoiceTrialLoading=false;}
 }

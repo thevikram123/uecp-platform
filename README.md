@@ -39,7 +39,7 @@ The Worker exposes:
 - `POST /text/brief` — incident brief generation using `gemini-2.5-pro`.
 - `POST /text/transcribe` — short Tamil/English audio transcription and English translation using `gemini-2.5-pro`.
 - `POST /tts/sample` — Tamil and English operational speech using `gemini-2.5-pro-preview-tts`.
-- `POST /tts/live` — fresh Tamil or Indian-English operational WAV speech through the secure Worker. Requests are capped at 420 characters and are never retried automatically.
+- `POST /tts/live` — fresh Tamil or Indian-English operational WAV speech through the secure Worker. Language-specific male and female voices rotate without immediate repeats. Requests are capped at 420 characters and are never retried automatically.
 - `WS /live` — key-protected Gemini Live relay enforcing `gemini-3.5-live-translate-preview` and configured translation languages.
 
 Cloudflare Rate Limiting bindings protect text, TTS and live-session routes. A production rollout still requires UECP user authentication, formal quota policy and state data-localisation controls.

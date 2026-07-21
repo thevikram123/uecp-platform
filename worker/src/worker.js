@@ -6,6 +6,17 @@ const DEFAULT_TEXT_MODEL = 'gemini-2.5-pro';
 const DEFAULT_TTS_MODEL = 'gemini-2.5-pro-preview-tts';
 const DEFAULT_SARVAM_TTS_MODEL = 'bulbul:v3';
 const LIVE_TTS_CHARACTER_LIMIT = 420;
+const LIVE_VOICE_POOLS = Object.freeze({
+  'ta-IN': Object.freeze({
+    male: Object.freeze(['ratan', 'rohan', 'mani', 'shubh', 'rahul']),
+    female: Object.freeze(['ishita', 'ritu', 'priya', 'roopa', 'pooja'])
+  }),
+  'en-IN': Object.freeze({
+    male: Object.freeze(['ratan', 'mani', 'shubh', 'sunny', 'rahul']),
+    female: Object.freeze(['ishita', 'priya', 'roopa', 'pooja', 'shreya'])
+  })
+});
+const LIVE_VOICE_NAMES = new Set(Object.values(LIVE_VOICE_POOLS).flatMap(pool => [...pool.male, ...pool.female]));
 const TTS_SAMPLES = Object.freeze({
   'first-scene-ta': {
     voice: 'Kore',
@@ -246,17 +257,20 @@ async function createLiveVoice(request, env, cors, sarvamApiKey) {
   }
   const languageCode = body.languageCode === 'en-IN' ? 'en-IN' : body.languageCode === 'ta-IN' ? 'ta-IN' : '';
   if (!languageCode) return json({ error: 'languageCode must be ta-IN or en-IN' }, 400, cors);
-  const voiceGender = body.voiceGender === 'male' ? 'male' : 'female';
+  const voiceGender = ['male', 'female', 'any'].includes(body.voiceGender) ? body.voiceGender : 'any';
+  const requestedExclusion = clean(body.excludeSpeaker || '', 30).toLowerCase();
+  const excludeSpeaker = LIVE_VOICE_NAMES.has(requestedExclusion) ? requestedExclusion : '';
 
   try {
-    const wav = await synthesizeLiveVoice({ text, languageCode, voiceGender }, env, sarvamApiKey);
-    return new Response(wav, {
+    const audio = await synthesizeLiveVoice({ text, languageCode, voiceGender, excludeSpeaker }, env, sarvamApiKey);
+    return new Response(audio.wav, {
       headers: {
         ...cors,
         'Content-Type': 'audio/wav',
         'Cache-Control': 'no-store',
         'Content-Disposition': 'inline; filename="live-radio.wav"',
-        'X-UECP-Audio-Characters': String(text.length)
+        'X-UECP-Audio-Characters': String(text.length),
+        'X-UECP-Voice': audio.speaker
       }
     });
   } catch (error) {
@@ -475,6 +489,7 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx,
           WHERE r.incident_id = ? ORDER BY r.status, r.callsign LIMIT 16`).bind(incidentId).all()
       ]);
       const videoAnalyticsEvent = createIcccVideoAnalyticsEvent(incident);
+      let previousVoiceSpeaker = '';
       await send('status', { runId, stage: 'context', label: 'Incident context loaded', incidentId });
       await send('source', { runId, source: 'ICCC Video Analytics API', payload: videoAnalyticsEvent });
       for (let turn = 0; !signal?.aborted; turn += 1) {
@@ -502,7 +517,8 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx,
           await send('status', { runId, stage: 'voice', label: `Rendering ${update.unit} radio audio`, messageId: update.id });
           try {
             if (!sarvamApiKey) throw new Error('Live voice is not configured: SARVAM_API_KEY is missing.');
-            const audio = await createSpontaneousVoice(update, env, sarvamApiKey);
+            const audio = await createSpontaneousVoice(update, env, sarvamApiKey, previousVoiceSpeaker);
+            previousVoiceSpeaker = audio.speaker;
             await send('audio', { runId, messageId: update.id, languageCode: update.languageCode, ...audio });
           } catch (error) {
             console.warn(JSON.stringify({ message: 'incident voice skipped', runId, messageId: update.id, error: error instanceof Error ? error.message : String(error) }));
@@ -669,19 +685,20 @@ function waitForNextTurn(milliseconds, signal) {
   });
 }
 
-async function createSpontaneousVoice(update, env, sarvamApiKey) {
+async function createSpontaneousVoice(update, env, sarvamApiKey, excludeSpeaker = '') {
   const voiceGender = update.voice === 'Kore' ? 'female' : 'male';
-  const wav = await synthesizeLiveVoice({
+  const audio = await synthesizeLiveVoice({
     text: clean(update.message || '', LIVE_TTS_CHARACTER_LIMIT),
     languageCode: update.languageCode === 'ta-IN' ? 'ta-IN' : 'en-IN',
-    voiceGender
+    voiceGender,
+    excludeSpeaker
   }, env, sarvamApiKey);
-  return { audioBase64: encodeBase64(wav.buffer), mimeType: 'audio/wav' };
+  return { audioBase64: encodeBase64(audio.wav.buffer), mimeType: 'audio/wav', speaker: audio.speaker };
 }
 
-async function synthesizeLiveVoice({ text, languageCode, voiceGender }, env, sarvamApiKey) {
+async function synthesizeLiveVoice({ text, languageCode, voiceGender, excludeSpeaker = '' }, env, sarvamApiKey) {
   if (!text) throw new Error('Live voice received an empty message.');
-  const speaker = voiceGender === 'male' ? 'ratan' : 'priya';
+  const speaker = chooseLiveVoice(languageCode, voiceGender, excludeSpeaker);
   const payload = {
     text,
     target_language_code: languageCode,
@@ -707,7 +724,20 @@ async function synthesizeLiveVoice({ text, languageCode, voiceGender }, env, sar
   }
   const encodedAudio = data?.audios?.[0];
   if (!encodedAudio) throw new Error('Live voice generation succeeded but returned no audio.');
-  return decodeBase64(encodedAudio);
+  return { wav: decodeBase64(encodedAudio), speaker };
+}
+
+function chooseLiveVoice(languageCode, voiceGender, excludeSpeaker) {
+  const pool = LIVE_VOICE_POOLS[languageCode] || LIVE_VOICE_POOLS['en-IN'];
+  const candidates = voiceGender === 'male'
+    ? pool.male
+    : voiceGender === 'female'
+      ? pool.female
+      : [...pool.male, ...pool.female];
+  const available = candidates.filter(name => name !== excludeSpeaker);
+  const draw = new Uint32Array(1);
+  crypto.getRandomValues(draw);
+  return available[draw[0] % available.length];
 }
 
 function isAllowedOrigin(origin, env) {
@@ -720,6 +750,7 @@ function corsHeaders(origin, env) {
   const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Expose-Headers': 'X-UECP-Audio-Characters, X-UECP-Voice',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
     'X-Content-Type-Options': 'nosniff',
