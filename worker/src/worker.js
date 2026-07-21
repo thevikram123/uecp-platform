@@ -64,11 +64,12 @@ export default {
       const isTranscribe = url.pathname === '/text/transcribe' && request.method === 'POST';
       const isTts = url.pathname === '/tts/sample' && request.method === 'POST';
       const isLive = url.pathname === '/live' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
+      const isIncidentStream = url.pathname === '/agent/incident-stream' && request.method === 'GET';
       const incidentMatch = url.pathname.match(/^\/data\/incidents\/([A-Z0-9-]+)$/);
       const isIncidentList = url.pathname === '/data/incidents' && request.method === 'GET';
       const isIncidentDetail = Boolean(incidentMatch) && request.method === 'GET';
       const isData = isIncidentList || isIncidentDetail;
-      if (!isBrief && !isTranscribe && !isTts && !isLive && !isData) return json({ error: 'not found' }, 404, cors);
+      if (!isBrief && !isTranscribe && !isTts && !isLive && !isIncidentStream && !isData) return json({ error: 'not found' }, 404, cors);
 
       const actorKey = request.headers.get('CF-Connecting-IP') || 'unknown-client';
       const limiter = isLive ? env.LIVE_RATE_LIMITER : isTts ? env.TTS_RATE_LIMITER : isTranscribe ? env.STT_RATE_LIMITER : isData ? env.DATA_RATE_LIMITER : env.TEXT_RATE_LIMITER;
@@ -87,6 +88,10 @@ export default {
 
       if (isTranscribe) {
         return transcribeAudio(request, env, cors, geminiApiKey);
+      }
+
+      if (isIncidentStream) {
+        return await streamIncidentResponse(url, env, cors, geminiApiKey, ctx);
       }
 
       if (isTts) {
@@ -323,7 +328,7 @@ async function openLiveTranslation(request, env, geminiApiKey) {
   const client = pair[0];
   const server = pair[1];
   server.binaryType = 'arraybuffer';
-  server.accept({ allowHalfOpen: true });
+  server.accept();
 
   let upstream;
   try {
@@ -335,7 +340,7 @@ async function openLiveTranslation(request, env, geminiApiKey) {
       return new Response('Gemini Live connection failed', { status: 502 });
     }
     upstream.binaryType = 'arraybuffer';
-    upstream.accept({ allowHalfOpen: true });
+    upstream.accept();
   } catch (error) {
     console.error(JSON.stringify({ message: 'Gemini Live connection error', error: error instanceof Error ? error.message : String(error) }));
     server.close(1011, 'Gemini Live unavailable');
@@ -396,6 +401,216 @@ async function openLiveTranslation(request, env, geminiApiKey) {
   upstream.addEventListener('error', () => closeBoth(1011, 'upstream socket error'));
 
   return new Response(null, { status: 101, webSocket: client });
+}
+
+function streamIncidentResponse(url, env, cors, geminiApiKey, ctx) {
+  const incidentId = clean(url.searchParams.get('incidentId') || 'INC-0431', 40);
+  if (!/^INC-[A-Z0-9-]+$/.test(incidentId)) return json({ error: 'invalid incident id' }, 400, cors);
+  const encoder = new TextEncoder();
+  const runId = crypto.randomUUID();
+  const textModel = env.TEXT_MODEL || DEFAULT_TEXT_MODEL;
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const pipeline = (async () => {
+    const send = (event, value) => writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`));
+    const generated = [];
+    try {
+      await send('status', { runId, stage: 'context', label: 'Loading incident context', incidentId });
+      const incident = await env.DB.prepare('SELECT * FROM incidents WHERE id = ? AND is_demo = 1').bind(incidentId).first();
+      if (!incident) throw new Error('incident not found');
+      const contextResults = await Promise.all([
+        env.DB.prepare(`SELECT source_name, source_type, language_code, body, translated_body, sent_at
+          FROM incident_messages WHERE incident_id = ? ORDER BY sequence_no DESC LIMIT 14`).bind(incidentId).all(),
+        env.DB.prepare(`SELECT title, status, priority, owner_agency_id, due_at
+          FROM incident_tasks WHERE incident_id = ? ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END LIMIT 10`).bind(incidentId).all(),
+        env.DB.prepare(`SELECT r.callsign, r.resource_type, r.status, r.eta_minutes, a.short_name AS agency
+          FROM incident_resources r JOIN agencies a ON a.id = r.agency_id
+          WHERE r.incident_id = ? ORDER BY r.status, r.callsign LIMIT 16`).bind(incidentId).all()
+      ]);
+      const videoAnalyticsEvent = createIcccVideoAnalyticsEvent(incident);
+      await send('status', { runId, stage: 'context', label: 'Incident context loaded', incidentId });
+      await send('source', { runId, source: 'ICCC Video Analytics API', payload: videoAnalyticsEvent });
+      for (let turn = 0; turn < 4; turn += 1) {
+        await send('status', { runId, stage: 'thinking', label: `Choosing operational update ${turn + 1}`, turn: turn + 1 });
+        const desiredLanguage = chooseWeightedLanguage(turn, generated);
+        const update = await chooseNextIncidentUpdate({
+          incident,
+          recentMessages: contextResults[0].results.slice().reverse(),
+          tasks: contextResults[1].results,
+          resources: contextResults[2].results,
+          videoAnalyticsEvent,
+          generated,
+          turn,
+          desiredLanguage,
+          runId,
+          model: textModel,
+          apiKey: geminiApiKey
+        });
+        update.id = `${runId}-${turn + 1}`;
+        update.turn = turn + 1;
+        if (update.voiceRequired && generated.filter(item => item.voiceRequired).length >= 2) update.voiceRequired = false;
+        generated.push(update);
+        await send('message', update);
+        if (update.voiceRequired) {
+          await send('status', { runId, stage: 'voice', label: `Rendering ${update.unit} radio audio`, messageId: update.id });
+          const audio = await createSpontaneousVoice(update, env, geminiApiKey);
+          await send('audio', { runId, messageId: update.id, languageCode: update.languageCode, ...audio });
+        }
+      }
+      await send('complete', { runId, count: generated.length, voiced: generated.filter(item => item.voiceRequired).length });
+    } catch (error) {
+      console.error(JSON.stringify({ message: 'incident stream failed', runId, error: error instanceof Error ? error.message : String(error) }));
+      try { await send('stream-error', { runId, error: 'The live response run could not be completed. Please retry.' }); } catch {}
+    } finally {
+      try { await writer.close(); } catch {}
+    }
+  })();
+  ctx.waitUntil(pipeline);
+
+  return new Response(readable, {
+    headers: {
+      ...cors,
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store',
+      'X-Accel-Buffering': 'no',
+      'X-Content-Type-Options': 'nosniff'
+    }
+  });
+}
+
+async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resources, videoAnalyticsEvent, generated, turn, desiredLanguage, runId, model, apiKey }) {
+  const prompt = [
+    'You are operating a human-supervised multi-agency emergency communications demonstration in Chennai.',
+    'Think independently and choose the single most operationally useful NEXT communication for the incident.',
+    'This is a live simulation, not a fixed screenplay. Vary the speaker, wording, channel, and language naturally between runs.',
+    'Keep call dispatch in the loop while allowing field Police, Fire, Traffic, 108 medical and road-control units to coordinate directly.',
+    'Use only the incident facts below. Do not invent new casualties, measurements, arrival confirmations, fire status, or verified observations.',
+    'You may issue a request, acknowledgement, handoff, safety reminder, verification request, or status synthesis grounded in known facts.',
+    'If mentioning an unresolved fact, label it unverified or request confirmation.',
+    'The service applies a 70% Tamil / 30% English operational language mix while ensuring both languages appear in a run.',
+    `For this turn, write the spoken message in ${desiredLanguage === 'ta-IN' ? 'Tamil (ta-IN)' : 'English (en-IN)'} and set languageCode accordingly.`,
+    'Set voiceRequired true only for a concise update that should also be relayed over radio. At most two updates in the run should request voice.',
+    'Choose a realistic Chennai stakeholder and callsign. Do not call yourself an AI and do not mention model providers.',
+    turn === 0
+      ? 'This is the opening coordination message. Base it primarily on the ICCC Video Analytics API event and initiate the appropriate dispatch/verification loop.'
+      : 'Read every update already generated in this run. Your next message must respond to the full conversation state up to this exact turn and must not repeat an earlier update.',
+    `This is turn ${turn + 1} of 4. Run entropy: ${runId}. Current Chennai time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
+    '',
+    `INCIDENT: ${JSON.stringify(incident)}`,
+    `ICCC VIDEO ANALYTICS API EVENT: ${JSON.stringify(videoAnalyticsEvent)}`,
+    `RECENT MESSAGES: ${JSON.stringify(recentMessages)}`,
+    `OPEN TASKS: ${JSON.stringify(tasks)}`,
+    `RESOURCES: ${JSON.stringify(resources)}`,
+    `UPDATES ALREADY GENERATED THIS RUN: ${JSON.stringify(generated)}`,
+    '',
+    'Return exactly one new update matching the response schema.'
+  ].join('\n');
+
+  const upstream = await fetch(`${GEMINI_HTTP}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.9,
+        topP: 0.95,
+        maxOutputTokens: 520,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            speakerName: { type: 'STRING' },
+            agency: { type: 'STRING' },
+            unit: { type: 'STRING' },
+            channel: { type: 'STRING', enum: ['incident-chat', 'radio-relay', 'dispatch-console'] },
+            languageCode: { type: 'STRING', enum: ['ta-IN', 'en-IN'] },
+            message: { type: 'STRING' },
+            englishTranslation: { type: 'STRING' },
+            voiceRequired: { type: 'BOOLEAN' },
+            voice: { type: 'STRING', enum: ['Kore', 'Puck'] },
+            rationale: { type: 'STRING' }
+          },
+          required: ['speakerName', 'agency', 'unit', 'channel', 'languageCode', 'message', 'englishTranslation', 'voiceRequired', 'voice', 'rationale']
+        }
+      }
+    })
+  });
+  const data = await upstream.json();
+  if (!upstream.ok) throw new Error(`text generation failed (${upstream.status}): ${clean(data?.error?.message || '', 180)}`);
+  const raw = data?.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+  if (!raw) throw new Error('text generation returned no update');
+  let output;
+  try { output = JSON.parse(raw); } catch { throw new Error('text generation returned invalid structured output'); }
+  return {
+    speakerName: clean(output.speakerName || 'State Control', 80),
+    agency: clean(output.agency || 'State Control', 60),
+    unit: clean(output.unit || 'UECP', 40),
+    channel: ['incident-chat', 'radio-relay', 'dispatch-console'].includes(output.channel) ? output.channel : 'incident-chat',
+    languageCode: output.languageCode === 'ta-IN' ? 'ta-IN' : 'en-IN',
+    message: clean(output.message || '', 700),
+    englishTranslation: clean(output.englishTranslation || output.message || '', 700),
+    voiceRequired: Boolean(output.voiceRequired),
+    voice: output.voice === 'Puck' ? 'Puck' : 'Kore',
+    rationale: clean(output.rationale || 'Next operational coordination need', 180)
+  };
+}
+
+function createIcccVideoAnalyticsEvent(incident) {
+  return {
+    schema: 'iccc.video-analytics.event.v1',
+    eventId: `ICCC-G24-${crypto.randomUUID()}`,
+    camera: { id: 'CAM-G24', name: 'Guindy Flyover Southbound', streamState: 'live' },
+    capturedAt: new Date().toISOString(),
+    location: {
+      label: incident.location,
+      latitude: incident.latitude,
+      longitude: incident.longitude,
+      city: 'Chennai'
+    },
+    detections: [
+      { type: 'multi_vehicle_collision', confidence: 0.94, objectCount: 3 },
+      { type: 'vehicle_fire_signature', confidence: 0.91, active: true },
+      { type: 'carriageway_obstruction', confidence: 0.96, direction: 'southbound' }
+    ],
+    summary: 'Probable multi-vehicle collision with visible fire signature and southbound carriageway obstruction. Operator verification and emergency dispatch recommended.',
+    verification: { state: 'machine_detected', humanReviewRequired: true },
+    privacy: { faceRecognitionUsed: false, plateValuesIncluded: false }
+  };
+}
+
+function chooseWeightedLanguage(turn, generated) {
+  const usedTamil = generated.some(item => item.languageCode === 'ta-IN');
+  const usedEnglish = generated.some(item => item.languageCode === 'en-IN');
+  if (turn === 3 && !usedEnglish) return 'en-IN';
+  if (turn === 3 && !usedTamil) return 'ta-IN';
+  const draw = new Uint32Array(1);
+  crypto.getRandomValues(draw);
+  return draw[0] / 0xffffffff < 0.7 ? 'ta-IN' : 'en-IN';
+}
+
+async function createSpontaneousVoice(update, env, geminiApiKey) {
+  const style = update.voice === 'Kore' ? 'a composed female Indian emergency dispatcher' : 'a calm male Chennai field responder';
+  const payload = {
+    model: env.TTS_MODEL || DEFAULT_TTS_MODEL,
+    input: `Speak as ${style} over an operational radio channel. Use concise, controlled cadence. Speak only this ${update.languageCode === 'ta-IN' ? 'Tamil' : 'English'} message: ${update.message}`,
+    response_format: { type: 'audio' },
+    generation_config: { speech_config: [{ voice: update.voice }] }
+  };
+  const upstream = await fetch(`${GEMINI_HTTP}/v1beta/interactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey, 'Api-Revision': '2026-05-20' },
+    body: JSON.stringify(payload)
+  });
+  const data = await upstream.json();
+  if (!upstream.ok) throw new Error(`voice generation failed (${upstream.status})`);
+  const audio = data?.output_audio || data?.steps
+    ?.filter(step => step.type === 'model_output')
+    .flatMap(step => step.content || [])
+    .find(content => content.type === 'audio' && content.data);
+  if (!audio) throw new Error('voice generation returned no audio');
+  const decoded = decodeBase64(audio.data);
+  const wav = audio.mime_type === 'audio/wav' ? decoded : makeWav(decoded, Number(audio.sample_rate) || 24000, Number(audio.channels) || 1);
+  return { audioBase64: encodeBase64(wav.buffer), mimeType: 'audio/wav' };
 }
 
 function isAllowedOrigin(origin, env) {

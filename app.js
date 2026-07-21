@@ -140,6 +140,12 @@ const state = {
   organizationAgency: 'All agencies',
   organizationSelectedPerson: null,
   organizationCollapsed: new Set(),
+  agentStreamRunning: false,
+  agentStreamAbort: null,
+  liveAudio: {},
+  translationStarting: false,
+  translationSetupReceived: false,
+  translationPcmPending: new Int16Array(0),
   databaseLoaded: false,
   composerMentionIds: [],
   nextAudioTime: 0,
@@ -390,7 +396,7 @@ async function initOrganizationChart() {
       const visibleIds=new Set(visibleNodes.map(node=>node.id));
       const nodes=visibleNodes.map(node=>({...node,data:{...node.data,collapsed:node.data.kind==='agency'&&state.organizationCollapsed.has(node.data.agency),highlighted:node.data.personId===state.organizationSelectedPerson||(filtering&&matchingIds.has(node.data.personId))||(activeAgency&&node.data.agency===activeAgency&&node.data.kind==='agency')},className:filtering&&node.data.kind==='person'&&!matchingIds.has(node.data.personId)?'organization-dim':''}));
       const edges=graph.edges.filter(edge=>visibleIds.has(edge.source)&&visibleIds.has(edge.target)).map(edge=>({...edge,animated:Boolean(activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())),style:{stroke:activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())?'#111111':'#b8b8b8',strokeWidth:activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())?2.5:1.2}}));
-      return React.createElement(ReactFlow,{nodes,edges,nodeTypes:{org:FlowNode},fitView:true,fitViewOptions:{padding:.11,minZoom:.42},minZoom:.42,maxZoom:1.8,nodesDraggable:true,nodesConnectable:false,elementsSelectable:true,onInit:instance=>{state.organizationFitView=()=>instance.fitView({padding:.11,minZoom:.42,duration:250});},onNodeClick:(_,node)=>{if(node.data.kind==='agency'){if(state.organizationCollapsed.has(node.data.agency))state.organizationCollapsed.delete(node.data.agency);else state.organizationCollapsed.add(node.data.agency);state.organizationRender?.();setTimeout(()=>state.organizationFitView?.(),30);return;}if(node.data.personId){state.organizationSelectedPerson=Number(node.data.personId);state.organizationRender?.();openPerson(Number(node.data.personId));}}},
+      return React.createElement(ReactFlow,{nodes,edges,nodeTypes:{org:FlowNode},fitView:false,defaultViewport:{x:-290,y:105,zoom:.7},minZoom:.38,maxZoom:1.8,nodesDraggable:true,nodesConnectable:false,elementsSelectable:true,onInit:instance=>{state.organizationFitView=()=>instance.fitView({padding:.11,minZoom:.42,duration:250});requestAnimationFrame(()=>instance.setCenter(1300,360,{zoom:.7,duration:0}));},onNodeClick:(_,node)=>{if(node.data.kind==='agency'){if(state.organizationCollapsed.has(node.data.agency))state.organizationCollapsed.delete(node.data.agency);else state.organizationCollapsed.add(node.data.agency);state.organizationRender?.();setTimeout(()=>state.organizationFitView?.(),30);return;}if(node.data.personId){state.organizationSelectedPerson=Number(node.data.personId);state.organizationRender?.();openPerson(Number(node.data.personId));}}},
         React.createElement(Background,{variant:BackgroundVariant.Dots,gap:24,size:1,color:'#00000018'}),
         React.createElement(Controls,{showInteractive:false}),
         React.createElement(MiniMap,{nodeColor:node=>node.data.kind==='command'||node.data.kind==='cluster'?'#ffe600':'#ffffff',maskColor:'#ffffffbb',pannable:true,zoomable:true})
@@ -435,16 +441,26 @@ function renderComms() {
   const messages = conversations[channel.id] || [];
   return `<section class="view"><div class="view-head"><div><p class="eyebrow">VOICE · PTT · CHAT · FILES</p><h2>Unified communications</h2><p>Sample operational conversations show officers how radio, app, SIP and translated messages converge in one incident record.</p></div><div class="view-actions"><button class="button secondary" data-action="new-group">${icon('users')} New group</button></div></div>
     <div class="comms-layout"><aside class="channel-list"><div class="channel-search"><input class="text-input" placeholder="Search channels"></div>${channels.map(c=>`<button class="channel-item ${c.id===channel.id?'active':''}" data-channel="${c.id}"><span class="channel-icon">${icon(c.icon)}</span><div><strong>${c.name}</strong><small>${c.meta}</small></div><time>${c.time}</time></button>`).join('')}</aside>
-      <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header><div class="message-stream" id="messageStream">${messages.map(messageMarkup).join('')}</div><div class="composer"><div class="mention-picker" id="mentionPicker" hidden></div><button class="icon-button mention-trigger" data-action="mention-trigger" aria-label="Mention a person or unit">@</button><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group · type @ to find anyone"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
+      <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header>${channel.id==='fire'?liveResponsePanel():''}<div class="message-stream" id="messageStream">${messages.map(messageMarkup).join('')}</div><div class="composer"><div class="mention-picker" id="mentionPicker" hidden></div><button class="icon-button mention-trigger" data-action="mention-trigger" aria-label="Mention a person or unit">@</button><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group · type @ to find anyone"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
     </div></section>`;
 }
 
+function liveResponsePanel() {
+  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>SPONTANEOUS RESPONSE STREAM</b><small id="agentRunStatus">${state.agentStreamRunning?'A live run is deciding the next coordination step':'Ready · current incident context will be read at run time'}</small></div></div><div class="live-response-mix"><span>70% தமிழ்</span><span>30% English</span><span>Fresh radio audio</span></div><button class="button ${state.agentStreamRunning?'dark':'primary'}" data-action="${state.agentStreamRunning?'stop-agent-stream':'start-agent-stream'}" id="agentStreamButton">${state.agentStreamRunning?`${icon('x',13)} Stop run`:`${icon('activity',13)} Start live run`}</button></section>`;
+}
+
 function messageMarkup(m) {
-  let body = m.text || '';
+  let body = escapeHtml(m.text || '');
   (m.mentions||[]).forEach(id=>{const person=people.find(item=>item.id===id);if(person)body=body.replaceAll(`@${escapeHtml(person.name)}`,`<button class="mention-token" data-person="${person.id}">@${escapeHtml(person.name)}</button>`);});
-  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><small class="audio-model">Approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} operational voice</small><div style="margin-top:9px">${m.text}</div>`;
+  if (m.type === 'api') body = `<div class="api-source-head"><b>JSON EVENT RECEIVED</b><span>operator verification required</span></div><pre class="api-event">${escapeHtml(JSON.stringify(m.apiPayload,null,2))}</pre>`;
+  if (m.type === 'audio') {
+    const audioAction=m.audioKey?`data-action="play-live-audio" data-audio-key="${escapeHtml(m.audioKey)}"`:`data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}"`;
+    body = `<div class="audio-bubble"><button ${audioAction} aria-label="Play ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio update">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration||'NEW'}</b></div><small class="audio-model">${m.agentGenerated?'Generated now · fresh operational voice':`Approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} operational voice`}</small><div style="margin-top:9px">${escapeHtml(m.text||'')}</div>`;
+  }
   if (m.type === 'file') body = `<div class="audio-bubble">${icon('camera',22)}<div><strong>${m.file}</strong><br><small>${m.detail}</small></div></div>`;
-  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${m.from}</b><time>${m.time}</time>${m.ai?'<span class="status-tag live">SYSTEM</span>':''}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${m.translationModel||'Live translation'} · source → English</b>${m.translation}</div>`:''}</div></article>`;
+  if(m.voicePending)body+=`<div class="voice-rendering"><i></i> Fresh radio voice is rendering</div>`;
+  const tag=m.agentGenerated?'<span class="status-tag live">LIVE AGENT</span>':m.ai?'<span class="status-tag live">SYSTEM</span>':'';
+  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${escapeHtml(m.from)}</b><time>${escapeHtml(m.time)}</time>${tag}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${escapeHtml(m.translationModel||'Live translation')} · source → English</b>${escapeHtml(m.translation)}</div>`:''}${m.agentGenerated&&m.rationale?`<small class="agent-rationale">WHY NEXT · ${escapeHtml(m.rationale)}</small>`:''}</div></article>`;
 }
 
 function sampleIdForMessage(message) {
@@ -544,6 +560,9 @@ function handleAction(action, button) {
     'save-worker': saveWorkerSettings,
     'test-worker': testWorker,
     'load-translation-demo': loadTranslationDemo,
+    'start-agent-stream': startIncidentStream,
+    'stop-agent-stream': stopIncidentStream,
+    'play-live-audio': () => playLiveAudio(button),
     'refresh-brief': () => refreshBrief(button),
     'export-sitrep': () => downloadText('UECP_SITREP_INC-0431.txt', 'UECP SITUATION REPORT\nINC-0431 · Multi-vehicle collision with vehicle fire\nLocation: GST Road near Guindy flyover\nStatus: Live\nFire suppression, traffic diversion and trauma triage active. Two red-priority patients reported.\nGenerated: '+new Date().toLocaleString('en-IN')),
     'export-audit': () => downloadText('UECP_Audit_Manifest.txt','UECP EVIDENCE MANIFEST\nHash chain: VALID\nObjects: 18,600,000\nExported: '+new Date().toISOString()),
@@ -684,6 +703,82 @@ async function testWorker() {
   catch(e){ toast(`Worker connection failed · ${e.message}`); }
 }
 
+async function startIncidentStream() {
+  if(state.agentStreamRunning)return;
+  state.agentStreamRunning=true;
+  state.agentStreamAbort=new AbortController();
+  updateAgentRunUi('Connecting to the incident context stream…',true);
+  const url=(localStorage.getItem('uecpWorkerUrl')||DEFAULT_WORKER_URL).replace(/\/$/,'');
+  try {
+    const response=await fetch(`${url}/agent/incident-stream?incidentId=INC-0431`,{headers:{Accept:'text/event-stream'},signal:state.agentStreamAbort.signal});
+    if(!response.ok){let detail='stream unavailable';try{detail=(await response.json()).error||detail;}catch{}throw new Error(detail);}
+    await consumeEventStream(response,handleIncidentStreamEvent);
+  } catch(error) {
+    if(error.name!=='AbortError'){updateAgentRunUi(`Run stopped · ${error.message}`,false);toast(`Live response run failed · ${error.message}`);}
+  } finally {
+    state.agentStreamRunning=false;state.agentStreamAbort=null;
+    const button=document.querySelector('#agentStreamButton');if(button){button.dataset.action='start-agent-stream';button.className='button primary';button.innerHTML=`${icon('activity',13)} Start another run`;button.onclick=()=>handleAction('start-agent-stream',button);}
+  }
+}
+
+function stopIncidentStream() {
+  state.agentStreamAbort?.abort();state.agentStreamRunning=false;updateAgentRunUi('Run stopped by operator',false);
+}
+
+async function consumeEventStream(response,onEvent) {
+  if(!response.body)throw new Error('streaming response body unavailable');
+  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
+  while(true){
+    const {done,value}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done}).replace(/\r\n/g,'\n');
+    let boundary;
+    while((boundary=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);let event='message';const data=[];block.split('\n').forEach(line=>{if(line.startsWith('event:'))event=line.slice(6).trim();if(line.startsWith('data:'))data.push(line.slice(5).trim());});if(data.length){let payload;try{payload=JSON.parse(data.join('\n'));}catch{continue;}await onEvent(event,payload);}}
+    if(done)break;
+  }
+}
+
+async function handleIncidentStreamEvent(event,payload) {
+  if(event==='status'){updateAgentRunUi(payload.label||'Live run active',true);return;}
+  if(event==='source'){
+    conversations.fire.push({id:`${payload.runId}-source`,from:'ICCC Video Analytics API · CAM-G24',time:currentChennaiTime(),type:'api',apiPayload:payload.payload,agentGenerated:true,text:'Machine-readable source event'});
+    renderConversationMessages();updateAgentRunUi('ICCC JSON received · selecting the first coordination action',true);return;
+  }
+  if(event==='message'){
+    conversations.fire.push({id:payload.id,from:`${payload.speakerName} · ${payload.unit}`,time:currentChennaiTime(),text:payload.message,translation:payload.languageCode==='ta-IN'?payload.englishTranslation:'',translationModel:'Generated translation',audioLang:payload.languageCode,voicePending:payload.voiceRequired,agentGenerated:true,rationale:payload.rationale,channel:payload.channel});
+    renderConversationMessages();updateAgentRunUi(`${payload.unit} update received · conversation context advanced`,true);return;
+  }
+  if(event==='audio'){
+    const audioKey=payload.messageId;state.liveAudio[audioKey]=base64AudioUrl(payload.audioBase64,payload.mimeType||'audio/wav');
+    const message=conversations.fire.find(item=>item.id===payload.messageId);if(message){message.type='audio';message.audioKey=audioKey;message.voicePending=false;message.duration='NEW';}
+    renderConversationMessages();updateAgentRunUi('Fresh radio audio received · tap play on the latest voice update',true);return;
+  }
+  if(event==='complete'){updateAgentRunUi(`Run complete · ${payload.count} context-aware updates · ${payload.voiced} fresh voice relays`,false);toast('Spontaneous response run completed');return;}
+  if(event==='stream-error')throw new Error(payload.error||'live stream failed');
+}
+
+function renderConversationMessages() {
+  if(state.selectedChannel!=='fire')return;const stream=document.querySelector('#messageStream');if(!stream)return;
+  stream.innerHTML=conversations.fire.map(messageMarkup).join('');
+  stream.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>handleAction(button.dataset.action,button));
+  stream.querySelectorAll('[data-person]').forEach(button=>button.onclick=()=>openPerson(Number(button.dataset.person)));
+  stream.scrollTop=stream.scrollHeight;
+}
+
+function updateAgentRunUi(label,running) {
+  const status=document.querySelector('#agentRunStatus');if(status)status.textContent=label;
+  const pulse=document.querySelector('.live-response-pulse');pulse?.classList.toggle('active',running);
+  const button=document.querySelector('#agentStreamButton');if(button&&running){button.dataset.action='stop-agent-stream';button.className='button dark';button.innerHTML=`${icon('x',13)} Stop run`;button.onclick=()=>handleAction('stop-agent-stream',button);}
+}
+
+function currentChennaiTime(){return new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Kolkata'});}
+function base64AudioUrl(value,mimeType){const binary=atob(value),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);return URL.createObjectURL(new Blob([bytes],{type:mimeType}));}
+
+async function playLiveAudio(button) {
+  const source=state.liveAudio[button.dataset.audioKey];if(!source)return toast('Fresh voice audio is not ready yet');
+  button.disabled=true;button.innerHTML=icon('pause',12);radioChirp(880,.08);
+  try{await new Promise(resolve=>setTimeout(resolve,260));const audio=new Audio(source);audio.onended=()=>finishSample(button,'Fresh operational voice playback complete');audio.onerror=()=>finishSample(button,'Fresh voice playback failed');await audio.play();}
+  catch{finishSample(button,'Tap play again to allow audio');}
+}
+
 async function refreshBrief(button) {
   const original=button?.innerHTML; if(button){button.disabled=true;button.textContent='Generating…';}
   const url=localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL;
@@ -704,28 +799,29 @@ function loadTranslationDemo() {
   document.querySelector('#inputLanguageCode').textContent='TA'; document.querySelector('#inputConfidence').textContent='96% confidence'; document.querySelector('#outputState').textContent='translated in 480 ms'; toast('Sample Tamil radio translation loaded');
 }
 
-async function toggleTranslation() { if (state.translating) stopTranslation(); else await startTranslation(); }
+async function toggleTranslation() { if (state.translating||state.translationStarting) stopTranslation(); else await startTranslation(); }
 
 async function startTranslation() {
   const base=(document.querySelector('#workerUrl')?.value.trim()||localStorage.getItem('uecpWorkerUrl')||DEFAULT_WORKER_URL).replace(/\/$/,''); if(!base)return toast('Configure the Cloudflare Worker URL before starting');
   const target=document.querySelector('#targetLanguage').value; localStorage.setItem('uecpWorkerUrl',base);localStorage.setItem('uecpTargetLanguage',target);
   try {
     const wsUrl=base.replace(/^http/,'ws')+'/live'; const socket=new WebSocket(wsUrl); state.socket=socket;
+    state.translationStarting=true;state.translationSetupReceived=false;state.translationPcmPending=new Int16Array(0);updateMicUi();
     updateSession('Connecting securely…','Opening the Worker relay');
-    socket.onopen=async()=>{
+    socket.onopen=()=>{
       socket.send(JSON.stringify({setup:{generationConfig:{responseModalities:['AUDIO'],inputAudioTranscription:{},outputAudioTranscription:{},translationConfig:{targetLanguageCode:target,echoTargetLanguage:document.querySelector('#echoLanguage').checked}}}}));
-      await beginMicrophone(socket); state.translating=true; updateMicUi(); updateSession('Live translation active','Listening · tap the yellow microphone to stop');
+      updateSession('Gateway connected','Waiting for the live translation service to accept this session');
     };
-    socket.onmessage=e=>handleLiveMessage(e.data);
+    socket.onmessage=async e=>{try{await handleLiveMessage(e.data);}catch(error){toast(`Could not start microphone · ${error.message}`);stopTranslation();}};
     socket.onerror=()=>{toast('Live translation connection error');stopTranslation();};
-    socket.onclose=()=>{ if(state.translating)toast('Live translation session ended');stopTranslation(false); };
+    socket.onclose=e=>{ if(state.translating||state.translationStarting)toast(`Live translation session ended${e.reason?` · ${e.reason}`:''}`);stopTranslation(false); };
   } catch(e){ toast(`Could not start translation · ${e.message}`); stopTranslation(); }
 }
 
 async function beginMicrophone(socket) {
   const stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}}); state.audioStream=stream;
-  const Ctx=window.AudioContext||window.webkitAudioContext; const ctx=new Ctx(); state.audioContext=ctx; const source=ctx.createMediaStreamSource(stream); const processor=ctx.createScriptProcessor(4096,1,1); state.processor=processor;
-  processor.onaudioprocess=e=>{ if(socket.readyState!==WebSocket.OPEN)return; const pcm=downsampleTo16k(e.inputBuffer.getChannelData(0),ctx.sampleRate); socket.send(JSON.stringify({realtimeInput:{audio:{data:arrayBufferToBase64(pcm.buffer),mimeType:'audio/pcm;rate=16000'}}})); };
+  const Ctx=window.AudioContext||window.webkitAudioContext; const ctx=new Ctx(); state.audioContext=ctx;await ctx.resume();const source=ctx.createMediaStreamSource(stream); const processor=ctx.createScriptProcessor(4096,1,1); state.processor=processor;
+  processor.onaudioprocess=e=>{ if(socket.readyState!==WebSocket.OPEN||!state.translationSetupReceived)return; const pcm=downsampleTo16k(e.inputBuffer.getChannelData(0),ctx.sampleRate);const merged=new Int16Array(state.translationPcmPending.length+pcm.length);merged.set(state.translationPcmPending);merged.set(pcm,state.translationPcmPending.length);let offset=0;while(merged.length-offset>=1600){const chunk=merged.slice(offset,offset+1600);socket.send(JSON.stringify({realtimeInput:{audio:{data:pcm16ToBase64(chunk),mimeType:'audio/pcm;rate=16000'}}}));offset+=1600;}state.translationPcmPending=merged.slice(offset); };
   source.connect(processor); processor.connect(ctx.destination);
 }
 
@@ -735,12 +831,14 @@ function downsampleTo16k(input, sampleRate) {
   return output;
 }
 
-function handleLiveMessage(raw) {
-  try { const msg=JSON.parse(raw); const content=msg.serverContent; if(!content)return;
+async function handleLiveMessage(raw) {
+  try { const msg=JSON.parse(raw);if(msg.error)throw new Error(msg.error.message||'live translation service error');
+    if(msg.setupComplete&&!state.translationSetupReceived){state.translationSetupReceived=true;await beginMicrophone(state.socket);state.translationStarting=false;state.translating=true;updateMicUi();updateSession('Live translation active','Listening · speak naturally in Tamil or English');return;}
+    const content=msg.serverContent; if(!content)return;
     if(content.inputTranscription?.text){state.transcriptIn+=content.inputTranscription.text;setTranscript('inputTranscript',state.transcriptIn);document.querySelector('#inputLanguageCode').textContent=(content.inputTranscription.languageCode||'auto').toUpperCase();document.querySelector('#inputConfidence').textContent='live';}
     if(content.outputTranscription?.text){state.transcriptOut+=content.outputTranscription.text;setTranscript('outputTranscript',state.transcriptOut);document.querySelector('#outputLanguageCode').textContent=(content.outputTranscription.languageCode||localStorage.getItem('uecpTargetLanguage')||'en').toUpperCase();document.querySelector('#outputState').textContent='streaming';}
     content.modelTurn?.parts?.forEach(part=>{if(part.inlineData?.data)playPcm24k(part.inlineData.data);});
-  } catch(e){console.warn('UECP Live message parse failed',e);}
+  } catch(e){console.warn('UECP Live message parse failed',e);throw e;}
 }
 
 function setTranscript(id,text){const el=document.querySelector('#'+id);if(el){el.textContent=text;el.classList.remove('transcript-placeholder');}}
@@ -750,12 +848,13 @@ function playPcm24k(base64) {
 }
 
 function stopTranslation(closeSocket=true) {
-  state.translating=false; if(state.processor){state.processor.disconnect();state.processor=null;} if(state.audioStream){state.audioStream.getTracks().forEach(t=>t.stop());state.audioStream=null;} if(closeSocket&&state.socket){try{state.socket.close(1000,'user stopped');}catch{}}state.socket=null; updateMicUi();updateSession('Ready to translate','Session stopped · transcripts remain visible');
+  state.translating=false;state.translationStarting=false;state.translationSetupReceived=false;state.translationPcmPending=new Int16Array(0);if(state.processor){state.processor.disconnect();state.processor=null;} if(state.audioStream){state.audioStream.getTracks().forEach(t=>t.stop());state.audioStream=null;}if(state.audioContext){state.audioContext.close().catch(()=>{});state.audioContext=null;} if(closeSocket&&state.socket){try{state.socket.close(1000,'user stopped');}catch{}}state.socket=null; updateMicUi();updateSession('Ready to translate','Session stopped · transcripts remain visible');
 }
 
-function updateMicUi(){const b=document.querySelector('#translateMic');if(!b)return;b.classList.toggle('active',state.translating);b.innerHTML=icon(state.translating?'x':'mic');b.setAttribute('aria-label',state.translating?'Stop live translation':'Start live translation');}
+function updateMicUi(){const b=document.querySelector('#translateMic');if(!b)return;const active=state.translating||state.translationStarting;b.classList.toggle('active',active);b.innerHTML=icon(active?'x':'mic');b.setAttribute('aria-label',active?'Stop live translation':'Start live translation');}
 function updateSession(title,detail){const s=document.querySelector('#sessionStatus'),d=document.querySelector('#sessionDetail');if(s)s.textContent=title;if(d)d.textContent=detail;}
 function arrayBufferToBase64(buffer){const bytes=new Uint8Array(buffer);let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);return btoa(binary);}
+function pcm16ToBase64(pcm){const bytes=new Uint8Array(pcm.buffer,pcm.byteOffset,pcm.byteLength);let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);return btoa(binary);}
 
 async function playSyntheticSample(button) {
   button.disabled=true;
