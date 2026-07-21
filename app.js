@@ -146,7 +146,7 @@ const state = {
   agentStreamRunning: false,
   agentStreamAbort: null,
   liveAudio: {},
-  showArchivedChat: false,
+  showArchivedChat: true,
   liveIncidentStarted: false,
   translationStarting: false,
   translationSetupReceived: false,
@@ -445,16 +445,14 @@ function renderComms() {
   const channel = channels.find(c=>c.id===state.selectedChannel) || channels[0];
   const messages = channel.id==='fire' ? currentFireConversation() : (conversations[channel.id] || []);
   const streamContent = channel.id==='fire' && messages.length===0 ? liveIncidentEmptyState() : messages.map(messageMarkup).join('');
-  return `<section class="view"><div class="view-head"><div><p class="eyebrow">VOICE · PTT · CHAT · FILES</p><h2>Unified communications</h2><p>Start a new incident stream or open the archived sample to explore cross-agency voice, chat and dispatch coordination.</p></div><div class="view-actions"><button class="button secondary" data-action="new-group">${icon('users')} New group</button></div></div>
+  return `<section class="view"><div class="view-head"><div><p class="eyebrow">VOICE · PTT · CHAT · FILES</p><h2>Unified communications</h2><p>Explore the vehicle-fire response through cross-agency chat, dispatch updates and recorded Tamil radio traffic.</p></div><div class="view-actions"><button class="button secondary" data-action="new-group">${icon('users')} New group</button></div></div>
     <div class="comms-layout"><aside class="channel-list"><div class="channel-search"><input class="text-input" placeholder="Search channels"></div>${channels.map(c=>`<button class="channel-item ${c.id===channel.id?'active':''}" data-channel="${c.id}"><span class="channel-icon">${icon(c.icon)}</span><div><strong>${c.name}</strong><small>${c.meta}</small></div><time>${c.time}</time></button>`).join('')}</aside>
       <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header>${channel.id==='fire'?liveResponsePanel():''}<div class="message-stream" id="messageStream">${streamContent}</div><div class="composer"><div class="mention-picker" id="mentionPicker" hidden></div><button class="icon-button mention-trigger" data-action="mention-trigger" aria-label="Mention a person or unit">@</button><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group · type @ to find anyone"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
     </div></section>`;
 }
 
 function liveResponsePanel() {
-  const archiveAction=state.showArchivedChat?'return-live-session':'show-archived-chat';
-  const archiveLabel=state.showArchivedChat?'Return to live session':'Archived sample';
-  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse ${state.agentStreamRunning?'active':''}"></span><div><b>${state.showArchivedChat?'ARCHIVED INCIDENT SAMPLE':'NEW LIVE INCIDENT'}</b><small id="agentRunStatus">${state.showArchivedChat?'Recorded sample · live generation is paused':state.agentStreamRunning?'Incident coordination is continuing until you stop it':'Ready · a new session begins with a verified camera alert'}</small></div></div><div class="live-response-actions"><button class="button secondary compact" data-action="${archiveAction}">${archiveLabel}</button><button class="button ${state.agentStreamRunning?'dark':'primary'}" data-action="${state.agentStreamRunning?'stop-agent-stream':'start-agent-stream'}" id="agentStreamButton">${state.agentStreamRunning?`${icon('x',13)} Stop`:`${icon('activity',13)} Start new live incident`}</button></div></section>`;
+  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>INCIDENT RESPONSE SAMPLE</b><small>Tamil and English field recordings · packaged demonstration audio</small></div></div><span class="status-tag live">SAMPLE MODE</span></section>`;
 }
 
 function currentFireConversation(){return state.showArchivedChat?archivedFireConversation:conversations.fire;}
@@ -897,40 +895,11 @@ async function playSyntheticSample(button) {
   radioChirp(880, .08);
   await new Promise(resolve=>setTimeout(resolve,420));
   const localSource=LOCAL_AUDIO_SAMPLES[button.dataset.audioSample];
-  if(localSource){
-    const localAudio=new Audio(localSource);
-    let fallbackStarted=false;
-    const fallback=()=>{if(fallbackStarted)return;fallbackStarted=true;playGeneratedSample(button);};
-    localAudio.onended=()=>finishSample(button,'Operational voice sample complete');
-    localAudio.onerror=fallback;
-    try { await localAudio.play(); return; } catch { fallback(); return; }
-  }
-  await playGeneratedSample(button);
-}
-
-async function playGeneratedSample(button) {
-  try {
-    const workerUrl=(localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL).replace(/\/$/,'');
-    const response=await fetch(`${workerUrl}/tts/sample`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sampleId:button.dataset.audioSample})});
-    if(!response.ok)throw new Error('Generated audio unavailable');
-    const audioUrl=URL.createObjectURL(await response.blob());
-    const audio=new Audio(audioUrl);
-    audio.onended=()=>{URL.revokeObjectURL(audioUrl);finishSample(button,'Operational voice sample complete');};
-    audio.onerror=()=>{URL.revokeObjectURL(audioUrl);playBrowserVoice(button);};
-    await audio.play();
-  } catch {
-    playBrowserVoice(button);
-  }
-}
-
-function playBrowserVoice(button) {
-  if (!('speechSynthesis' in window)) return finishSample(button,'Audio playback is unavailable in this browser');
-  speechSynthesis.cancel();
-  const utterance=new SpeechSynthesisUtterance(button.dataset.audioText || 'UECP radio sample');
-  utterance.lang=button.dataset.audioLang || 'en-IN'; utterance.rate=.93; utterance.pitch=.92;
-  utterance.onend=()=>finishSample(button,'Browser voice fallback complete');
-  utterance.onerror=()=>finishSample(button,'No compatible system voice is installed for this sample');
-  setTimeout(()=>speechSynthesis.speak(utterance),110);
+  if(!localSource)return finishSample(button,'Recorded audio is unavailable');
+  const localAudio=new Audio(localSource);
+  localAudio.onended=()=>finishSample(button,'Radio recording playback complete');
+  localAudio.onerror=()=>finishSample(button,'Recorded audio could not be played');
+  try { await localAudio.play(); } catch { finishSample(button,'Recorded audio could not be played'); }
 }
 function finishSample(button,message){radioChirp(620,.06);button.innerHTML=icon('play',12);button.disabled=false;toast(`${message} · source retained in evidence`);}
 function radioChirp(frequency,duration){
