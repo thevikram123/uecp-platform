@@ -231,6 +231,7 @@ svg { width: 1em; height: 1em; display: block; }
 .translation { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #aaa; font-size: 9px; }
 .translation b { display: block; margin-bottom: 3px; font-size: 7px; letter-spacing: .08em; text-transform: uppercase; }
 .audio-bubble { display: flex; align-items: center; gap: 9px; }
+.audio-model { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .audio-bubble button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: #111; cursor: pointer; }
 .wave { height: 22px; flex: 1; display: flex; align-items: center; gap: 2px; }
 .wave i { width: 2px; background: #777; }

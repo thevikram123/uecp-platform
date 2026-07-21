@@ -8,7 +8,7 @@ Interactive demonstration console for the Tamil Nadu Police multi-agency emergen
 - A plausible end-to-end incident response: citizen call, ERSS call-taking and CAD dispatch, automatic command-group creation, direct field coordination, dispatcher oversight, ICCC context, AI action extraction and an approved voice relay.
 - Sample radio/app conversations, Tamil-to-English transcripts, incident files, PTT interactions and source-linked AI briefs.
 - RoIP, DMR, SIP, ERSS, ICCC, CCTNS and evidence-store integration health.
-- Gemini 3.5 Live Translate for audio and Gemini 3.1 Flash-Lite for text briefs.
+- Gemini 3.5 Live Translate for interactive interpretation, Gemini 3.1 Flash-Lite for text briefs and Gemini 3.1 Flash TTS Preview for bilingual sample radio audio.
 
 ## Run the UI locally
 
@@ -26,19 +26,23 @@ Open `http://localhost:4173`.
 cd worker
 npm install
 npx wrangler login
-npx wrangler secret put GEMINI_API_KEY
 npx wrangler deploy
 ```
 
-Before deploying, set `ALLOWED_ORIGINS` in `worker/wrangler.toml` to the exact local and GitHub Pages origins. Do not commit the API key. Paste the deployed Worker URL into **Live translation → Secure gateway** in the app.
+The Worker binds the existing account-level `GEMINI_API_KEY` from Cloudflare Secrets Store; the key is not stored in this repository. `ALLOWED_ORIGINS` in `worker/wrangler.jsonc` is restricted to the GitHub Pages origin.
 
 The Worker exposes:
 
 - `GET /health` — approved models and configuration state.
+- `GET /data/incidents` — fictional Chennai live-incident list from Cloudflare D1.
+- `GET /data/incidents/:id` — full incident context including messages, timeline, tasks, resources, evidence and audio metadata.
 - `POST /text/brief` — incident brief generation using `gemini-3.1-flash-lite`.
+- `POST /tts/sample` — approved Tamil and English operational samples using `gemini-3.1-flash-tts-preview`.
 - `WS /live` — key-protected Gemini Live relay enforcing `gemini-3.5-live-translate-preview` and approved translation languages.
 
-The included per-isolate limiter is suitable for a controlled prototype. A production rollout should move session quotas to a Durable Object or Cloudflare Rate Limiting, add UECP user authentication, and follow state data-localisation requirements.
+Cloudflare Rate Limiting bindings protect text, TTS and live-session routes. A production rollout still requires UECP user authentication, formal quota policy and state data-localisation controls.
+
+The D1 database is created as `uecp-demo`. Its schema and fictional Chennai seed data live in `worker/migrations/0001_incident_demo.sql`. Apply it with `npx wrangler d1 migrations apply uecp-demo --remote`.
 
 ## GitHub Pages
 

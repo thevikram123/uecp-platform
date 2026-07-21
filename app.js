@@ -36,6 +36,8 @@ function icon(name, size = 18) {
   return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[key] || ICONS.activity}</svg>`;
 }
 
+const DEFAULT_WORKER_URL = 'https://uecp-gemini-proxy.thevikram123.workers.dev';
+
 const people = [
   { id: 1, name: 'Insp. R. Selvakumar', initials: 'RS', role: 'Station House Officer', agency: 'Police', zone: 'T. Nagar', unit: 'TN-CTY-07', presence: 'online', method: 'App + PTT', language: 'Tamil / English', phone: '+91 ••••• 4182' },
   { id: 2, name: 'SI M. Anitha', initials: 'MA', role: 'Patrol Sub-Inspector', agency: 'Police', zone: 'T. Nagar', unit: 'PRV-114', presence: 'radio', method: 'Radio only', language: 'Tamil', phone: '+91 ••••• 7720' },
@@ -210,15 +212,23 @@ function renderComms() {
 
 function messageMarkup(m) {
   let body = m.text || '';
-  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><div style="margin-top:9px">${m.text}</div>`;
+  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play Gemini-generated ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><small class="audio-model">Gemini 3.1 TTS · ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} sample</small><div style="margin-top:9px">${m.text}</div>`;
   if (m.type === 'file') body = `<div class="audio-bubble">${icon('camera',22)}<div><strong>${m.file}</strong><br><small>${m.detail}</small></div></div>`;
   return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${m.from}</b><time>${m.time}</time>${m.ai?'<span class="status-tag live">AI</span>':''}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>Gemini 3.5 · Tamil → English</b>${m.translation}</div>`:''}</div></article>`;
+}
+
+function sampleIdForMessage(message) {
+  if (message.sampleId) return message.sampleId;
+  if (message.from.startsWith('SI M. Anitha')) return 'first-scene-ta';
+  if (message.from.startsWith('TI V. Aravind')) return 'traffic-en';
+  if (message.from.startsWith('AI Voice Relay')) return 'relay-en';
+  return 'district-radio-ta';
 }
 
 const languages = [['ta','தமிழ் · Tamil'],['en','English'],['hi','हिन्दी · Hindi'],['te','తెలుగు · Telugu'],['ml','മലയാളം · Malayalam'],['kn','ಕನ್ನಡ · Kannada'],['ur','اردو · Urdu'],['bn','বাংলা · Bengali'],['mr','मराठी · Marathi'],['gu','ગુજરાતી · Gujarati']];
 
 function renderTranslate() {
-  const workerUrl = localStorage.getItem('uecpWorkerUrl') || '';
+  const workerUrl = localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL;
   const target = localStorage.getItem('uecpTargetLanguage') || 'en';
   return `<section class="view"><div class="view-head"><div><p class="eyebrow">GEMINI LIVE THROUGH SECURE WORKER</p><h2>Real-time speech translation</h2><p>Low-latency Tamil ↔ English and multilingual interpretation for cross-agency calls and bridged radio traffic.</p></div><div class="view-actions"><span class="classification">PILOT · HUMAN SUPERVISED</span></div></div>
     <div class="translate-layout"><section class="translate-console"><div class="translate-hero"><div><p class="eyebrow">LIVE INTERPRETER</p><h3>Speak naturally. Hear the translation.</h3><p>Continuous audio translation · source and output transcripts retained with consent</p></div><span class="model-chip">gemini-3.5-live-translate-preview</span></div><div class="language-route"><label>Input language<select id="sourceLanguage"><option value="auto">Auto-detect</option>${languages.map(([c,n])=>`<option value="${c}">${n}</option>`).join('')}</select></label><span class="route-arrow">${icon('languages')}</span><label>Translate into<select id="targetLanguage">${languages.map(([c,n])=>`<option value="${c}" ${c===target?'selected':''}>${n}</option>`).join('')}</select></label></div>
@@ -351,7 +361,7 @@ async function testWorker() {
 
 async function refreshBrief(button) {
   const original=button?.innerHTML; if(button){button.disabled=true;button.textContent='Generating…';}
-  const url=localStorage.getItem('uecpWorkerUrl');
+  const url=localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL;
   try {
     if (!url) throw new Error('demo');
     const r=await fetch(`${url}/text/brief`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({incidentId:'INC-0431',events:['Bus, lorry and car collided near Guindy flyover','Car fire suppression in progress','50 metre hot zone active','Southbound lanes closed with emergency corridor','Two red-priority patients and three walking wounded','Lorry cargo declaration not yet verified','NHAI spill control ETA six minutes']})});
@@ -372,7 +382,7 @@ function loadTranslationDemo() {
 async function toggleTranslation() { if (state.translating) stopTranslation(); else await startTranslation(); }
 
 async function startTranslation() {
-  const base=(document.querySelector('#workerUrl')?.value.trim()||localStorage.getItem('uecpWorkerUrl')||'').replace(/\/$/,''); if(!base)return toast('Configure the Cloudflare Worker URL before starting');
+  const base=(document.querySelector('#workerUrl')?.value.trim()||localStorage.getItem('uecpWorkerUrl')||DEFAULT_WORKER_URL).replace(/\/$/,''); if(!base)return toast('Configure the Cloudflare Worker URL before starting');
   const target=document.querySelector('#targetLanguage').value; localStorage.setItem('uecpWorkerUrl',base);localStorage.setItem('uecpTargetLanguage',target);
   try {
     const wsUrl=base.replace(/^http/,'ws')+'/live'; const socket=new WebSocket(wsUrl); state.socket=socket;
@@ -422,21 +432,77 @@ function updateMicUi(){const b=document.querySelector('#translateMic');if(!b)ret
 function updateSession(title,detail){const s=document.querySelector('#sessionStatus'),d=document.querySelector('#sessionDetail');if(s)s.textContent=title;if(d)d.textContent=detail;}
 function arrayBufferToBase64(buffer){const bytes=new Uint8Array(buffer);let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);return btoa(binary);}
 
-function playSyntheticSample(button) {
-  if (!('speechSynthesis' in window)) return toast('Audio playback is unavailable in this browser');
-  speechSynthesis.cancel();
+async function playSyntheticSample(button) {
+  button.disabled=true;
   button.innerHTML=icon('pause',12);
   radioChirp(880, .08);
+  try {
+    const workerUrl=(localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL).replace(/\/$/,'');
+    const response=await fetch(`${workerUrl}/tts/sample`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sampleId:button.dataset.audioSample})});
+    if(!response.ok)throw new Error('Gemini audio unavailable');
+    const audioUrl=URL.createObjectURL(await response.blob());
+    const audio=new Audio(audioUrl);
+    audio.onended=()=>{URL.revokeObjectURL(audioUrl);finishSample(button,'Gemini 3.1 Flash TTS sample complete');};
+    audio.onerror=()=>{URL.revokeObjectURL(audioUrl);playBrowserVoice(button);};
+    await audio.play();
+  } catch {
+    playBrowserVoice(button);
+  }
+}
+
+function playBrowserVoice(button) {
+  if (!('speechSynthesis' in window)) return finishSample(button,'Audio playback is unavailable in this browser');
+  speechSynthesis.cancel();
   const utterance=new SpeechSynthesisUtterance(button.dataset.audioText || 'UECP radio sample');
   utterance.lang=button.dataset.audioLang || 'en-IN'; utterance.rate=.93; utterance.pitch=.92;
-  utterance.onend=()=>{radioChirp(620,.06);button.innerHTML=icon('play',12);toast('Sample operational audio complete · source retained in evidence');};
-  utterance.onerror=()=>{button.innerHTML=icon('play',12);toast('No compatible system voice is installed for this sample');};
+  utterance.onend=()=>finishSample(button,'Browser voice fallback complete');
+  utterance.onerror=()=>finishSample(button,'No compatible system voice is installed for this sample');
   setTimeout(()=>speechSynthesis.speak(utterance),110);
 }
+function finishSample(button,message){radioChirp(620,.06);button.innerHTML=icon('play',12);button.disabled=false;toast(`${message} · source retained in evidence`);}
 function radioChirp(frequency,duration){try{const Ctx=window.AudioContext||window.webkitAudioContext,ctx=new Ctx(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.frequency.value=frequency;gain.gain.setValueAtTime(.04,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+duration);osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+duration);}catch{}}
 function downloadText(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click();URL.revokeObjectURL(a.href);toast(`${name} downloaded`);}
 async function copyText(text,message){try{await navigator.clipboard.writeText(text);toast(message);}catch{toast('Copy is unavailable in this browser');}}
 function escapeHtml(value){return String(value).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+
+async function loadIncidentDatabase() {
+  try {
+    const [listResponse, detailResponse] = await Promise.all([
+      fetch(`${DEFAULT_WORKER_URL}/data/incidents`),
+      fetch(`${DEFAULT_WORKER_URL}/data/incidents/INC-0431`)
+    ]);
+    if (!listResponse.ok || !detailResponse.ok) return;
+    const listData = await listResponse.json();
+    const detailData = await detailResponse.json();
+    const existingById = new Map(incidents.map(incident => [incident.id, incident]));
+    incidents = listData.incidents.map(incident => ({
+      ...(existingById.get(incident.id) || {}),
+      id: incident.id,
+      title: incident.title,
+      location: incident.location,
+      severity: incident.severity,
+      source: incident.source,
+      status: incident.status,
+      age: incident.status === 'Live' ? 'Live now' : 'Monitoring',
+      responders: incident.responder_count
+    }));
+    conversations.fire = detailData.messages.map(message => ({
+      from: message.source_name,
+      time: new Date(message.sent_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Kolkata'}),
+      type: message.message_type,
+      duration: message.duration_seconds ? `0:${String(message.duration_seconds).padStart(2,'0')}` : undefined,
+      audioText: message.audio_transcript || message.body,
+      audioLang: message.language_code,
+      sampleId: message.audio_sample_id,
+      text: message.body,
+      translation: message.translated_body,
+      ai: message.source_type === 'ai',
+      mine: message.source_type === 'command'
+    }));
+    state.databaseContext = detailData;
+    render();
+  } catch {}
+}
 
 document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>navigate(b.dataset.view));
 document.querySelector('#menuButton').onclick=()=>document.querySelector('#sidebar').classList.toggle('open');
@@ -448,4 +514,4 @@ document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLower
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(titles[h]&&h!==state.view){state.view=h;render();}});
 setInterval(()=>{const c=document.querySelector('#clock');if(c)c.textContent=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Kolkata'})+' IST';},1000);
 
-hydrateIcons(); render();
+hydrateIcons(); render(); loadIncidentDatabase();

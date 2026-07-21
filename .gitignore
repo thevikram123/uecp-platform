@@ -3,3 +3,4 @@ Thumbs.db
 worker/node_modules/
 worker/.dev.vars
 .wrangler/
+worker/*.cpuprofile

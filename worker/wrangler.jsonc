@@ -1,0 +1,54 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uecp-gemini-proxy",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ALLOWED_ORIGINS": "https://thevikram123.github.io",
+    "LIVE_MODEL": "gemini-3.5-live-translate-preview",
+    "TEXT_MODEL": "gemini-3.1-flash-lite",
+    "TTS_MODEL": "gemini-3.1-flash-tts-preview"
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "GEMINI_API_KEY",
+      "store_id": "e0660ebafc5e4cc99716ab5d12e72d6f",
+      "secret_name": "GEMINI_API_KEY"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "uecp-demo",
+      "database_id": "eafbb292-1794-4167-9f8a-477dd3fbe3a0"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "TEXT_RATE_LIMITER",
+      "namespace_id": "43101",
+      "simple": { "limit": 30, "period": 60 }
+    },
+    {
+      "name": "LIVE_RATE_LIMITER",
+      "namespace_id": "43102",
+      "simple": { "limit": 8, "period": 60 }
+    },
+    {
+      "name": "TTS_RATE_LIMITER",
+      "namespace_id": "43103",
+      "simple": { "limit": 12, "period": 60 }
+    },
+    {
+      "name": "DATA_RATE_LIMITER",
+      "namespace_id": "43104",
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1, "invocation_logs": true },
+    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+  }
+}
