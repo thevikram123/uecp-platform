@@ -44,6 +44,11 @@
       "name": "DATA_RATE_LIMITER",
       "namespace_id": "43104",
       "simple": { "limit": 60, "period": 60 }
+    },
+    {
+      "name": "STT_RATE_LIMITER",
+      "namespace_id": "43105",
+      "simple": { "limit": 15, "period": 60 }
     }
   ],
   "observability": {

@@ -43,6 +43,7 @@ export default {
           service: 'UECP Gemini secure gateway',
           liveModel: env.LIVE_MODEL || DEFAULT_LIVE_MODEL,
           textModel: env.TEXT_MODEL || DEFAULT_TEXT_MODEL,
+          recordedAudioTranscriptionModel: env.TEXT_MODEL || DEFAULT_TEXT_MODEL,
           ttsModel: env.TTS_MODEL || DEFAULT_TTS_MODEL,
           apiKeyBindingConfigured: Boolean(env.GEMINI_API_KEY),
           incidentDatabaseConfigured: Boolean(env.DB)
@@ -52,16 +53,17 @@ export default {
       if (!isAllowedOrigin(origin, env)) return json({ error: 'origin not allowed' }, 403, cors);
 
       const isBrief = url.pathname === '/text/brief' && request.method === 'POST';
+      const isTranscribe = url.pathname === '/text/transcribe' && request.method === 'POST';
       const isTts = url.pathname === '/tts/sample' && request.method === 'POST';
       const isLive = url.pathname === '/live' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
       const incidentMatch = url.pathname.match(/^\/data\/incidents\/([A-Z0-9-]+)$/);
       const isIncidentList = url.pathname === '/data/incidents' && request.method === 'GET';
       const isIncidentDetail = Boolean(incidentMatch) && request.method === 'GET';
       const isData = isIncidentList || isIncidentDetail;
-      if (!isBrief && !isTts && !isLive && !isData) return json({ error: 'not found' }, 404, cors);
+      if (!isBrief && !isTranscribe && !isTts && !isLive && !isData) return json({ error: 'not found' }, 404, cors);
 
       const actorKey = request.headers.get('CF-Connecting-IP') || 'unknown-client';
-      const limiter = isLive ? env.LIVE_RATE_LIMITER : isTts ? env.TTS_RATE_LIMITER : isData ? env.DATA_RATE_LIMITER : env.TEXT_RATE_LIMITER;
+      const limiter = isLive ? env.LIVE_RATE_LIMITER : isTts ? env.TTS_RATE_LIMITER : isTranscribe ? env.STT_RATE_LIMITER : isData ? env.DATA_RATE_LIMITER : env.TEXT_RATE_LIMITER;
       const { success } = await limiter.limit({ key: `${url.pathname}:${actorKey}` });
       if (!success) return json({ error: 'rate limit exceeded; retry shortly' }, 429, cors);
 
@@ -73,6 +75,10 @@ export default {
 
       if (isBrief) {
         return createBrief(request, env, cors, geminiApiKey);
+      }
+
+      if (isTranscribe) {
+        return transcribeAudio(request, env, cors, geminiApiKey);
       }
 
       if (isTts) {
@@ -238,6 +244,72 @@ async function createBrief(request, env, cors, geminiApiKey) {
   return json({ brief, model, humanReviewRequired: true }, 200, cors);
 }
 
+async function transcribeAudio(request, env, cors, geminiApiKey) {
+  const mimeType = (request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const allowedTypes = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/aac']);
+  if (!allowedTypes.has(mimeType)) return json({ error: 'unsupported audio format' }, 415, cors);
+
+  const contentLength = Number(request.headers.get('content-length') || 0);
+  if (contentLength > 4_000_000) return json({ error: 'audio exceeds the 4 MB demo limit' }, 413, cors);
+  const audio = await request.arrayBuffer();
+  if (!audio.byteLength) return json({ error: 'audio is empty' }, 400, cors);
+  if (audio.byteLength > 4_000_000) return json({ error: 'audio exceeds the 4 MB demo limit' }, 413, cors);
+
+  const model = env.TEXT_MODEL || DEFAULT_TEXT_MODEL;
+  const prompt = [
+    'Transcribe this short public-safety voice note verbatim.',
+    'The speaker may use Tamil, English, or switch between them.',
+    'Preserve names, callsigns, road names, quantities, and operational terms exactly when audible.',
+    'Do not infer words that are not audible. Use [inaudible] for unclear speech.',
+    'Return the detected BCP-47 language code, the original transcript, and a faithful English translation.',
+    'If the transcript is already fully English, repeat it as the English translation.'
+  ].join('\n');
+
+  const upstream = await fetch(`${GEMINI_HTTP}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [
+        { text: prompt },
+        { inlineData: { mimeType, data: encodeBase64(audio) } }
+      ] }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 900,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            languageCode: { type: 'STRING' },
+            transcript: { type: 'STRING' },
+            englishTranslation: { type: 'STRING' }
+          },
+          required: ['languageCode', 'transcript', 'englishTranslation']
+        }
+      }
+    })
+  });
+
+  const data = await upstream.json();
+  if (!upstream.ok) {
+    console.error(JSON.stringify({ message: 'Gemini transcription request failed', status: upstream.status, detail: clean(data?.error?.message || 'upstream error', 300) }));
+    return json({ error: 'Gemini transcription request failed' }, upstream.status, cors);
+  }
+
+  const output = data?.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+  if (!output) return json({ error: 'Gemini returned an empty transcript' }, 502, cors);
+  let transcript;
+  try { transcript = JSON.parse(output); } catch { return json({ error: 'Gemini returned an invalid transcript' }, 502, cors); }
+  return json({
+    languageCode: clean(transcript.languageCode || 'und', 20),
+    transcript: clean(transcript.transcript || '', 8_000),
+    englishTranslation: clean(transcript.englishTranslation || '', 8_000),
+    model,
+    mode: 'recorded-audio',
+    humanReviewRequired: true
+  }, 200, cors);
+}
+
 async function openLiveTranslation(request, env, geminiApiKey) {
   const pair = new WebSocketPair();
   const client = pair[0];
@@ -352,6 +424,15 @@ function decodeBase64(value) {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
+}
+
+function encodeBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
 }
 
 function makeWav(pcm, sampleRate, channels) {

@@ -37,6 +37,12 @@ function icon(name, size = 18) {
 }
 
 const DEFAULT_WORKER_URL = 'https://uecp-gemini-proxy.thevikram123.workers.dev';
+const LOCAL_AUDIO_SAMPLES = Object.freeze({
+  'first-scene-ta': 'assets/audio/first-scene-ta.mp3',
+  'traffic-en': 'assets/audio/traffic-en.mp3',
+  'relay-en': 'assets/audio/relay-en.mp3',
+  'district-radio-ta': 'assets/audio/district-radio-ta.mp3'
+});
 
 const people = [
   { id: 1, name: 'Insp. R. Selvakumar', initials: 'RS', role: 'Station House Officer', agency: 'Police', zone: 'T. Nagar', unit: 'TN-CTY-07', presence: 'online', method: 'App + PTT', language: 'Tamil / English', phone: '+91 ••••• 4182' },
@@ -115,6 +121,10 @@ const state = {
   audioContext: null,
   audioStream: null,
   processor: null,
+  pttRecorder: null,
+  pttStream: null,
+  pttChunks: [],
+  pttStopRequested: false,
   nextAudioTime: 0,
   transcriptIn: '',
   transcriptOut: ''
@@ -212,9 +222,9 @@ function renderComms() {
 
 function messageMarkup(m) {
   let body = m.text || '';
-  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play Gemini-generated ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><small class="audio-model">Gemini 3.1 TTS · ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} sample</small><div style="margin-top:9px">${m.text}</div>`;
+  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><small class="audio-model">Approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} voice · Gemini TTS fallback</small><div style="margin-top:9px">${m.text}</div>`;
   if (m.type === 'file') body = `<div class="audio-bubble">${icon('camera',22)}<div><strong>${m.file}</strong><br><small>${m.detail}</small></div></div>`;
-  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${m.from}</b><time>${m.time}</time>${m.ai?'<span class="status-tag live">AI</span>':''}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>Gemini 3.5 · Tamil → English</b>${m.translation}</div>`:''}</div></article>`;
+  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${m.from}</b><time>${m.time}</time>${m.ai?'<span class="status-tag live">AI</span>':''}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${m.translationModel||'Gemini 3.5 Live'} · source → English</b>${m.translation}</div>`:''}</div></article>`;
 }
 
 function sampleIdForMessage(message) {
@@ -338,9 +348,65 @@ function sendMessage() {
 
 function bindPtt() {
   const ptt = document.querySelector('#pttButton'); if (!ptt) return;
-  const start = e => { e.preventDefault(); ptt.classList.add('transmitting'); ptt.innerHTML=`${icon('activity',13)} Transmitting`; };
-  const stop = () => { if (!ptt.classList.contains('transmitting')) return; ptt.classList.remove('transmitting'); ptt.innerHTML=`${icon('mic',13)} Hold to talk`; toast('PTT transmission recorded and shared to the incident group'); };
+  const start = async e => {
+    e.preventDefault();
+    if (state.pttRecorder) return;
+    state.pttStopRequested=false;
+    ptt.classList.add('transmitting'); ptt.innerHTML=`${icon('activity',13)} Recording`;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return;
+    try {
+      const stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      state.pttStream=stream; state.pttChunks=[];
+      const preferred=['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(type=>MediaRecorder.isTypeSupported(type));
+      const recorder=new MediaRecorder(stream,preferred?{mimeType:preferred}:undefined); state.pttRecorder=recorder;
+      recorder.ondataavailable=event=>{if(event.data.size)state.pttChunks.push(event.data);};
+      recorder.onstop=async()=>{
+        const blob=new Blob(state.pttChunks,{type:recorder.mimeType||'audio/webm'});
+        state.pttStream?.getTracks().forEach(track=>track.stop()); state.pttStream=null; state.pttRecorder=null; state.pttChunks=[];
+        if(blob.size)await transcribeAudioBlob(blob,'Field PTT voice note');
+        else {ptt.disabled=false;ptt.innerHTML=`${icon('mic',13)} Hold to talk`;toast('No audio was captured');}
+      };
+      recorder.start();
+      if(state.pttStopRequested)recorder.stop();
+    } catch(error) {
+      state.pttStream?.getTracks().forEach(track=>track.stop()); state.pttStream=null; state.pttRecorder=null;
+      ptt.disabled=false; ptt.classList.remove('transmitting'); ptt.innerHTML=`${icon('mic',13)} Hold to talk`;
+      toast(`Microphone unavailable · ${error.message}`);
+    }
+  };
+  const stop = () => {
+    if (!ptt.classList.contains('transmitting')) return;
+    state.pttStopRequested=true; ptt.classList.remove('transmitting'); ptt.disabled=true; ptt.innerHTML=`${icon('activity',13)} Transcribing…`;
+    if(state.pttRecorder?.state==='recording')state.pttRecorder.stop();
+    else if(!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder){ptt.disabled=false;ptt.innerHTML=`${icon('mic',13)} Hold to talk`;toast('PTT transmission captured in prototype mode');}
+  };
   ptt.addEventListener('pointerdown',start); ptt.addEventListener('pointerup',stop); ptt.addEventListener('pointercancel',stop); ptt.addEventListener('pointerleave',stop);
+}
+
+async function transcribeAudioBlob(blob, sourceLabel='Uploaded voice note') {
+  const workerUrl=(localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL).replace(/\/$/,'');
+  try {
+    const response=await fetch(`${workerUrl}/text/transcribe`,{method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob});
+    const data=await response.json(); if(!response.ok)throw new Error(data.error||'transcription failed');
+    const original=escapeHtml(data.transcript||'[No speech detected]');
+    const english=escapeHtml(data.englishTranslation||'');
+    conversations.fire.push({
+      from:`You · ${sourceLabel} · Gemini 3.1 Flash-Lite`,
+      time:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),
+      text:original,
+      translation:english&&english!==original?english:'',
+      translationModel:'Gemini 3.1 Flash-Lite',
+      mine:true,
+      ai:true
+    });
+    state.selectedChannel='fire';
+    if(state.view==='comms')render();
+    toast(`Voice note transcribed · ${String(data.languageCode||'auto').toUpperCase()} · human review required`);
+  } catch(error) {
+    toast(`Audio transcription failed · ${error.message}`);
+  } finally {
+    const button=document.querySelector('#pttButton'); if(button){button.disabled=false;button.classList.remove('transmitting');button.innerHTML=`${icon('mic',13)} Hold to talk`;}
+  }
 }
 
 function toast(message) {
@@ -436,6 +502,20 @@ async function playSyntheticSample(button) {
   button.disabled=true;
   button.innerHTML=icon('pause',12);
   radioChirp(880, .08);
+  await new Promise(resolve=>setTimeout(resolve,420));
+  const localSource=LOCAL_AUDIO_SAMPLES[button.dataset.audioSample];
+  if(localSource){
+    const localAudio=new Audio(localSource);
+    let fallbackStarted=false;
+    const fallback=()=>{if(fallbackStarted)return;fallbackStarted=true;playGeminiSample(button);};
+    localAudio.onended=()=>finishSample(button,'Approved operational voice sample complete');
+    localAudio.onerror=fallback;
+    try { await localAudio.play(); return; } catch { fallback(); return; }
+  }
+  await playGeminiSample(button);
+}
+
+async function playGeminiSample(button) {
   try {
     const workerUrl=(localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL).replace(/\/$/,'');
     const response=await fetch(`${workerUrl}/tts/sample`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sampleId:button.dataset.audioSample})});
@@ -460,7 +540,11 @@ function playBrowserVoice(button) {
   setTimeout(()=>speechSynthesis.speak(utterance),110);
 }
 function finishSample(button,message){radioChirp(620,.06);button.innerHTML=icon('play',12);button.disabled=false;toast(`${message} · source retained in evidence`);}
-function radioChirp(frequency,duration){try{const Ctx=window.AudioContext||window.webkitAudioContext,ctx=new Ctx(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.frequency.value=frequency;gain.gain.setValueAtTime(.04,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+duration);osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+duration);}catch{}}
+function radioChirp(frequency,duration){
+  if(frequency>700){const cue=new Audio('assets/audio/radio-cue.mp3');cue.volume=.28;cue.play().catch(()=>syntheticChirp(frequency,duration));return;}
+  syntheticChirp(frequency,duration);
+}
+function syntheticChirp(frequency,duration){try{const Ctx=window.AudioContext||window.webkitAudioContext,ctx=new Ctx(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.frequency.value=frequency;gain.gain.setValueAtTime(.04,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+duration);osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+duration);}catch{}}
 function downloadText(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click();URL.revokeObjectURL(a.href);toast(`${name} downloaded`);}
 async function copyText(text,message){try{await navigator.clipboard.writeText(text);toast(message);}catch{toast('Copy is unavailable in this browser');}}
 function escapeHtml(value){return String(value).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
@@ -507,7 +591,12 @@ async function loadIncidentDatabase() {
 document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>navigate(b.dataset.view));
 document.querySelector('#menuButton').onclick=()=>document.querySelector('#sidebar').classList.toggle('open');
 document.querySelector('#drawerBackdrop').onclick=closeDrawer;
-document.querySelector('#fileInput').onchange=e=>{if(e.target.files.length)toast(`${e.target.files.length} file${e.target.files.length>1?'s':''} attached to the evidence record`);e.target.value='';};
+document.querySelector('#fileInput').onchange=async e=>{
+  const files=[...e.target.files]; const audioFiles=files.filter(file=>file.type.startsWith('audio/'));
+  if(audioFiles.length){toast(`${audioFiles.length} audio file${audioFiles.length>1?'s':''} attached · Flash-Lite transcription started`);for(const file of audioFiles.slice(0,3))await transcribeAudioBlob(file,'Uploaded evidence audio');}
+  const otherCount=files.length-audioFiles.length;if(otherCount)toast(`${otherCount} file${otherCount>1?'s':''} attached to the evidence record`);
+  e.target.value='';
+};
 document.querySelector('#incidentDialog').addEventListener('close',e=>{if(e.target.returnValue!=='default')return;const form=new FormData(document.querySelector('#incidentForm'));const title=form.get('title'),locationName=form.get('location');if(!title||!locationName)return;const item={id:`INC-${String(432+incidents.length).padStart(4,'0')}`,title,location:locationName,severity:form.get('severity'),source:form.get('source'),age:'Just now',agencies:['POL','F&R','108'],responders:0,status:'Live'};incidents.unshift(item);state.selectedIncident=item.id;toast(`${item.id} created · responsible agencies notified`);navigate('incidents');document.querySelector('#incidentForm').reset();});
 document.querySelector('#globalSearch').addEventListener('input',e=>{const q=e.target.value.toLowerCase().trim();if(!q)return;const person=people.find(p=>`${p.name} ${p.unit} ${p.role}`.toLowerCase().includes(q));const incident=incidents.find(i=>`${i.id} ${i.title} ${i.location}`.toLowerCase().includes(q));if(person){state.query=e.target.value;navigate('directory');}else if(incident){state.selectedIncident=incident.id;navigate('incidents');}});
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();document.querySelector('#globalSearch').focus();}if(e.key==='Escape')closeDrawer();});
