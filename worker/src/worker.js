@@ -8,15 +8,16 @@ const DEFAULT_TTS_MODEL = 'gemini-2.5-pro-preview-tts';
 const DEFAULT_SARVAM_TTS_MODEL = 'bulbul:v3';
 const DEFAULT_INCIDENT_TEXT_MODEL = 'openai/gpt-oss-120b';
 const DEFAULT_VOICE_TRANSCRIPTION_MODEL = 'whisper-large-v3';
+const BUILD_ID = 'gender-radio-2026-07-22.1';
 const LIVE_TTS_CHARACTER_LIMIT = 420;
 const LIVE_VOICE_POOLS = Object.freeze({
   'ta-IN': Object.freeze({
-    male: Object.freeze(['ratan', 'rohan', 'mani', 'shubh', 'rahul']),
-    female: Object.freeze(['ishita', 'ritu', 'priya', 'roopa', 'pooja'])
+    male: Object.freeze(['ratan', 'rohan']),
+    female: Object.freeze(['ishita', 'ritu'])
   }),
   'en-IN': Object.freeze({
-    male: Object.freeze(['ratan', 'mani', 'shubh', 'sunny', 'rahul']),
-    female: Object.freeze(['ishita', 'priya', 'roopa', 'pooja', 'shreya'])
+    male: Object.freeze(['ratan']),
+    female: Object.freeze(['ishita'])
   })
 });
 const LIVE_VOICE_NAMES = new Set(Object.values(LIVE_VOICE_POOLS).flatMap(pool => [...pool.male, ...pool.female]));
@@ -66,6 +67,7 @@ export default {
         return json({
           ok: true,
           service: 'UECP secure communications gateway',
+          build: BUILD_ID,
           liveIncidentTextConfigured: Boolean(env.GROQ_API_KEY),
           liveIncidentVoiceConfigured: Boolean(env.SARVAM_API_KEY),
           liveIncidentVoiceContextConfigured: Boolean(env.GROQ_API_KEY),
@@ -581,7 +583,9 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     'Use Tamil most often and English when it is operationally natural. Ensure both languages appear early in the session.',
     `For this turn, write the spoken message in ${desiredLanguage === 'ta-IN' ? 'Tamil (ta-IN)' : 'English (en-IN)'} and set languageCode accordingly.`,
     'Keep the message to one or two concise operational sentences suitable for a real group chat or radio relay.',
-    'Choose a realistic Chennai stakeholder and callsign. Do not call yourself an AI and do not mention model providers.',
+    'Choose a realistic Chennai stakeholder and callsign. The speakerName and title must be consistent with speakerGender.',
+    'Use this gender-safe duty roster: female — SI M. Anitha, Dr. S. Lakshmi, Dispatcher R. Priya; male — SFO K. Prabhu, TI V. Aravind, Dispatcher K. Vignesh, NHAI Supervisor P. Mani.',
+    'Do not call yourself an AI and do not mention model providers.',
     turn === 0
       ? 'This is the opening coordination message. Base it primarily on the ICCC Video Analytics API event and initiate the appropriate dispatch/verification loop.'
       : 'Read every update already generated in this run. Your next message must respond to the full conversation state up to this exact turn and must not repeat an earlier update.',
@@ -592,13 +596,14 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     `RECENT MESSAGES: ${JSON.stringify(recentMessages)}`,
     `OPEN TASKS: ${JSON.stringify(tasks)}`,
     `RESOURCES: ${JSON.stringify(resources)}`,
-    `ALL PRIOR LIVE GROUP UPDATES, INCLUDING TRANSCRIPTS OF VOICE ACTUALLY HEARD: ${JSON.stringify(generated.map(item => ({ speakerName: item.speakerName, agency: item.agency, unit: item.unit, channel: item.channel, languageCode: item.languageCode, message: item.message, englishTranslation: item.englishTranslation, voiceTranscript: item.voiceTranscript || '' })))}`,
+    `ALL PRIOR LIVE GROUP UPDATES, INCLUDING TRANSCRIPTS OF VOICE ACTUALLY HEARD: ${JSON.stringify(generated.map(item => ({ speakerName: item.speakerName, speakerGender: item.speakerGender, agency: item.agency, unit: item.unit, channel: item.channel, languageCode: item.languageCode, message: item.message, englishTranslation: item.englishTranslation, voiceTranscript: item.voiceTranscript || '' })))}`,
     '',
     'Return exactly one new update matching the response schema.'
   ].join('\n');
 
   const properties = {
     speakerName: { type: 'string' },
+    speakerGender: { type: 'string', enum: ['male', 'female'] },
     agency: { type: 'string' },
     unit: { type: 'string' },
     channel: { type: 'string', enum: ['incident-chat', 'radio-relay', 'dispatch-console'] },
@@ -606,7 +611,6 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     message: { type: 'string' },
     englishTranslation: { type: 'string' },
     voiceRequired: { type: 'boolean' },
-    voice: { type: 'string', enum: ['Kore', 'Puck'] },
     rationale: { type: 'string' }
   };
   const requestBody = JSON.stringify({
@@ -658,8 +662,10 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
   if (!raw) throw new Error('text generation returned no update');
   let output;
   try { output = JSON.parse(raw); } catch { throw new Error('text generation returned invalid structured output'); }
+  const speakerName = clean(output.speakerName || 'State Control', 80);
   return {
-    speakerName: clean(output.speakerName || 'State Control', 80),
+    speakerName,
+    speakerGender: resolveSpeakerGender(speakerName, output.speakerGender),
     agency: clean(output.agency || 'State Control', 60),
     unit: clean(output.unit || 'UECP', 40),
     channel: ['incident-chat', 'radio-relay', 'dispatch-console'].includes(output.channel) ? output.channel : 'incident-chat',
@@ -667,9 +673,15 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     message: clean(output.message || '', 700),
     englishTranslation: clean(output.englishTranslation || output.message || '', 700),
     voiceRequired: Boolean(output.voiceRequired),
-    voice: output.voice === 'Puck' ? 'Puck' : 'Kore',
     rationale: clean(output.rationale || 'Next operational coordination need', 180)
   };
+}
+
+function resolveSpeakerGender(speakerName, requestedGender) {
+  const normalized = speakerName.toLowerCase();
+  if (['anitha', 'lakshmi', 'priya'].some(name => normalized.includes(name))) return 'female';
+  if (['prabhu', 'aravind', 'vignesh', 'mani'].some(name => normalized.includes(name))) return 'male';
+  return requestedGender === 'female' ? 'female' : 'male';
 }
 
 function createIcccVideoAnalyticsEvent(incident) {
@@ -706,17 +718,17 @@ function chooseWeightedLanguage(turn, generated) {
 }
 
 function createVoiceTurnPlan() {
-  const candidates = [1, 2, 3, 4, 5, 6, 7, 8];
-  for (let index = candidates.length - 1; index > 0; index -= 1) {
-    const draw = new Uint32Array(1);
-    crypto.getRandomValues(draw);
-    const swapIndex = draw[0] % (index + 1);
-    [candidates[index], candidates[swapIndex]] = [candidates[swapIndex], candidates[index]];
-  }
   const draw = new Uint32Array(1);
   crypto.getRandomValues(draw);
   const count = draw[0] % 2 === 0 ? 3 : 4;
-  return new Set(candidates.slice(0, count));
+  const chooseFrom = values => {
+    const choice = new Uint32Array(1);
+    crypto.getRandomValues(choice);
+    return values[choice[0] % values.length];
+  };
+  const turns = [1, chooseFrom([3, 4, 5]), chooseFrom([6, 7, 8])];
+  if (count === 4) turns.push(chooseFrom([2, 3, 4, 5].filter(turn => !turns.includes(turn))));
+  return new Set(turns);
 }
 
 function nextTurnDelay() {
@@ -734,7 +746,7 @@ function waitForNextTurn(milliseconds, signal) {
 }
 
 async function createSpontaneousVoice(update, env, sarvamApiKey, excludeSpeaker = '') {
-  const voiceGender = update.voice === 'Kore' ? 'female' : 'male';
+  const voiceGender = update.speakerGender === 'female' ? 'female' : 'male';
   const audio = await synthesizeLiveVoice({
     text: clean(update.message || '', LIVE_TTS_CHARACTER_LIMIT),
     languageCode: update.languageCode === 'ta-IN' ? 'ta-IN' : 'en-IN',
@@ -795,7 +807,68 @@ async function synthesizeLiveVoice({ text, languageCode, voiceGender, excludeSpe
   }
   const encodedAudio = data?.audios?.[0];
   if (!encodedAudio) throw new Error('Live voice generation succeeded but returned no audio.');
-  return { wav: decodeBase64(encodedAudio), speaker };
+  return { wav: prependRadioLeadIn(decodeBase64(encodedAudio)), speaker };
+}
+
+function prependRadioLeadIn(wav) {
+  if (wav.byteLength < 44) throw new Error('Live voice returned an invalid WAV file.');
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  const ascii = (offset, length) => String.fromCharCode(...wav.subarray(offset, offset + length));
+  if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') throw new Error('Live voice returned an unsupported audio container.');
+  let format;
+  let dataStart = -1;
+  let dataLength = 0;
+  for (let offset = 12; offset + 8 <= wav.byteLength;) {
+    const chunkId = ascii(offset, 4);
+    const chunkLength = view.getUint32(offset + 4, true);
+    const payloadOffset = offset + 8;
+    if (chunkId === 'fmt ' && chunkLength >= 16 && payloadOffset + 16 <= wav.byteLength) {
+      format = {
+        audioFormat: view.getUint16(payloadOffset, true),
+        channels: view.getUint16(payloadOffset + 2, true),
+        sampleRate: view.getUint32(payloadOffset + 4, true),
+        bitsPerSample: view.getUint16(payloadOffset + 14, true)
+      };
+    }
+    if (chunkId === 'data') {
+      dataStart = payloadOffset;
+      dataLength = Math.min(chunkLength, wav.byteLength - payloadOffset);
+      break;
+    }
+    offset = payloadOffset + chunkLength + (chunkLength % 2);
+  }
+  if (!format || dataStart < 0 || format.audioFormat !== 1 || format.bitsPerSample !== 16 || !format.channels || !format.sampleRate) {
+    throw new Error('Live voice returned a WAV format that cannot accept the radio lead-in.');
+  }
+  const radioLeadIn = createRadioLeadIn(format.sampleRate, format.channels);
+  const speechPcm = wav.subarray(dataStart, dataStart + dataLength);
+  const combined = new Uint8Array(radioLeadIn.byteLength + speechPcm.byteLength);
+  combined.set(radioLeadIn, 0);
+  combined.set(speechPcm, radioLeadIn.byteLength);
+  return makeWav(combined, format.sampleRate, format.channels);
+}
+
+function createRadioLeadIn(sampleRate, channels) {
+  const buzzFrames = Math.round(sampleRate * 0.36);
+  const gapFrames = Math.round(sampleRate * 0.09);
+  const samples = new Int16Array((buzzFrames + gapFrames) * channels);
+  for (let frame = 0; frame < buzzFrames; frame += 1) {
+    const time = frame / sampleRate;
+    const hashed = Math.sin((frame + 1) * 12.9898) * 43758.5453;
+    const noise = ((hashed - Math.floor(hashed)) * 2) - 1;
+    let value;
+    if (time < 0.11) {
+      value = noise * 0.17 * Math.min(1, time / 0.018);
+    } else if (time < 0.25) {
+      const toneEnvelope = Math.sin(Math.PI * ((time - 0.11) / 0.14));
+      value = (Math.sin(2 * Math.PI * 980 * time) * 0.22 * toneEnvelope) + (noise * 0.045);
+    } else {
+      value = noise * 0.13 * Math.max(0, (0.36 - time) / 0.11);
+    }
+    const pcmValue = Math.max(-32768, Math.min(32767, Math.round(value * 32767)));
+    for (let channel = 0; channel < channels; channel += 1) samples[(frame * channels) + channel] = pcmValue;
+  }
+  return new Uint8Array(samples.buffer);
 }
 
 function chooseLiveVoice(languageCode, voiceGender, excludeSpeaker) {

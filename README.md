@@ -8,7 +8,7 @@ Interactive demonstration console for the Tamil Nadu Police multi-agency emergen
 - A plausible end-to-end incident response: citizen call, ERSS call-taking and CAD dispatch, automatic command-group creation, direct field coordination, dispatcher oversight, ICCC context, action extraction and a voice relay.
 - Sample radio/app conversations, Tamil-to-English transcripts, incident files, PTT interactions and source-linked briefs.
 - RoIP, DMR, SIP, ERSS, ICCC, CCTNS and evidence-store integration health.
-- A fresh 10-message live incident run with 3–4 Tamil voice notes, varied speakers and voice transcripts carried into the next generated turn.
+- A fresh 10-message live incident run with Tamil radio beginning on message 2, gender-matched speakers, a walkie-talkie lead-in and voice transcripts carried into the next generated turn.
 
 ## Run the UI locally
 

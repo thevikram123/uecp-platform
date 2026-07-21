@@ -459,7 +459,7 @@ function liveResponsePanel() {
     const running=state.agentStreamRunning;
     const hasMessages=conversations.fire.length>0;
     const label=running?'LIVE INCIDENT GROUP':hasMessages?'LIVE RUN COMPLETE':'READY FOR NEW RUN';
-    const detail=running?'Fresh chat and Tamil radio voice notes are arriving in sequence':'10 new text updates · 3–4 Tamil voice notes · shared voice context';
+    const detail=running?'Fresh chat and Tamil radio voice notes are arriving in sequence':'10 new text updates · Tamil radio starts at message 2 · shared voice context';
     const action=running?'stop-agent-stream':'start-agent-stream';
     const actionLabel=running?`${icon('x',13)} Stop run`:`${icon('activity',13)} ${hasMessages?'Start another run':'Start live run'}`;
     return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse ${running?'active':''}"></span><div><b>${label}</b><small id="agentRunStatus">${detail}</small></div></div><div class="live-response-actions"><button class="button secondary" data-action="show-archived-chat">View sample conversation</button><button class="button ${running?'dark':'primary'}" id="agentStreamButton" data-action="${action}">${actionLabel}</button></div></section>`;
@@ -472,7 +472,7 @@ function liveResponsePanel() {
 function currentFireConversation(){return state.showArchivedChat?archivedFireConversation:conversations.fire;}
 
 function liveIncidentEmptyState(){
-  return `<div class="live-incident-empty"><span class="live-empty-icon">${icon('activity',22)}</span><div><b>EMPTY LIVE INCIDENT GROUP</b><h3>Start with a new ICCC camera alert</h3><p>A fresh run creates 10 contextual group messages with 3–4 Tamil radio voice notes placed between them. Each voice note is interpreted before the next update.</p></div><button class="button primary" data-action="start-agent-stream">Start live run</button></div>`;
+  return `<div class="live-incident-empty"><span class="live-empty-icon">${icon('activity',22)}</span><div><b>EMPTY LIVE INCIDENT GROUP</b><h3>Start with a new ICCC camera alert</h3><p>A fresh run creates 10 contextual group messages. Tamil radio begins with message 2, uses gender-matched voices and carries each interpreted voice note into the next update.</p></div><button class="button primary" data-action="start-agent-stream">Start live run</button></div>`;
 }
 
 function messageMarkup(m) {
@@ -830,8 +830,8 @@ function base64AudioUrl(value,mimeType){const binary=atob(value),bytes=new Uint8
 
 async function playLiveAudio(button) {
   const source=state.liveAudio[button.dataset.audioKey];if(!source)return toast('Fresh voice audio is not ready yet');
-  button.disabled=true;button.innerHTML=icon('pause',12);radioChirp(880,.08);
-  try{await new Promise(resolve=>setTimeout(resolve,260));const audio=new Audio(source);audio.onended=()=>finishSample(button,'Fresh operational voice playback complete');audio.onerror=()=>finishSample(button,'Fresh voice playback failed');await audio.play();}
+  button.disabled=true;button.innerHTML=icon('pause',12);
+  try{const audio=new Audio(source);audio.onended=()=>finishSample(button,'Fresh operational voice playback complete');audio.onerror=()=>finishSample(button,'Fresh voice playback failed');await audio.play();}
   catch{finishSample(button,'Tap play again to allow audio');}
 }
 
