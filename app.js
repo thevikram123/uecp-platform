@@ -328,16 +328,16 @@ function organizationGraphData() {
     'TANGEDCO':['State Load Dispatch','Chennai South Circle']
   };
   const nodes=[
-    {id:'state-control',type:'org',position:{x:730,y:20},data:{label:'Tamil Nadu State Control',sub:'Unified emergency command',kind:'command',badge:'TN'}},
-    {id:'response-operations',type:'org',position:{x:320,y:205},data:{label:'Response Operations',sub:'Police · Fire · Traffic · ERSS',kind:'cluster',badge:'RO'}},
-    {id:'support-operations',type:'org',position:{x:1130,y:205},data:{label:'Health & Support',sub:'Medical · EOC · Utilities',kind:'cluster',badge:'HS'}}
+    {id:'state-control',type:'org',position:{x:1185,y:20},data:{label:'Tamil Nadu State Control',sub:'Unified emergency command',kind:'command',badge:'TN'}},
+    {id:'response-operations',type:'org',position:{x:710,y:205},data:{label:'Response Operations',sub:'Police · Fire · Traffic · ERSS',kind:'cluster',badge:'RO'}},
+    {id:'support-operations',type:'org',position:{x:1745,y:205},data:{label:'Health & Support',sub:'Medical · EOC · Utilities',kind:'cluster',badge:'HS'}}
   ];
   const edges=[];
   edges.push({id:'edge-state-response',source:'state-control',target:'response-operations',type:'smoothstep',animated:true});
   edges.push({id:'edge-state-support',source:'state-control',target:'support-operations',type:'smoothstep',animated:true});
   const responseAgencies=new Set(['Police','Fire & Rescue','Traffic','ERSS 112']);
-  const responseX={'Police':0,'Fire & Rescue':265,'Traffic':530,'ERSS 112':795};
-  const supportX={'EMRI 108':1060,'Disaster Mgmt':1325,'TANGEDCO':1590};
+  const responseX={'Police':150,'Fire & Rescue':650,'Traffic':950,'ERSS 112':1250};
+  const supportX={'EMRI 108':1550,'Disaster Mgmt':1850,'TANGEDCO':2150};
   Object.entries(agencyMeta).forEach(([agency,[label,sub]])=>{
     const agencyId=`agency-${agency.replace(/\W+/g,'-').toLowerCase()}`;
     const x=responseAgencies.has(agency)?responseX[agency]:supportX[agency];
@@ -347,7 +347,7 @@ function organizationGraphData() {
     const agencyPeople=people.filter(person=>person.agency===agency);
     agencyPeople.forEach((person,personIndex)=>{
       const personId=`person-${person.id}`;
-      nodes.push({id:personId,type:'org',position:{x:x+(personIndex-(agencyPeople.length-1)/2)*190,y:615},data:{label:person.name,sub:`${person.role} · ${person.unit}`,kind:'person',agency,personId:person.id,presence:person.presence,badge:person.initials}});
+      nodes.push({id:personId,type:'org',position:{x:x+(personIndex-(agencyPeople.length-1)/2)*240,y:615},data:{label:person.name,sub:`${person.role} · ${person.unit}`,kind:'person',agency,personId:person.id,presence:person.presence,badge:person.initials}});
       edges.push({id:`edge-${agencyId}-${personId}`,source:agencyId,target:personId,type:'smoothstep'});
     });
   });
