@@ -1,10 +1,13 @@
 const GEMINI_HTTP = 'https://generativelanguage.googleapis.com';
 const GEMINI_LIVE = 'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const SARVAM_TTS_HTTP = 'https://api.sarvam.ai/text-to-speech';
+const GROQ_HTTP = 'https://api.groq.com/openai/v1';
 const DEFAULT_LIVE_MODEL = 'gemini-3.5-live-translate-preview';
 const DEFAULT_TEXT_MODEL = 'gemini-2.5-pro';
 const DEFAULT_TTS_MODEL = 'gemini-2.5-pro-preview-tts';
 const DEFAULT_SARVAM_TTS_MODEL = 'bulbul:v3';
+const DEFAULT_INCIDENT_TEXT_MODEL = 'openai/gpt-oss-120b';
+const DEFAULT_VOICE_TRANSCRIPTION_MODEL = 'whisper-large-v3';
 const LIVE_TTS_CHARACTER_LIMIT = 420;
 const LIVE_VOICE_POOLS = Object.freeze({
   'ta-IN': Object.freeze({
@@ -62,14 +65,11 @@ export default {
       if (url.pathname === '/health' && request.method === 'GET') {
         return json({
           ok: true,
-          service: 'UECP Gemini secure gateway',
-          liveModel: env.LIVE_MODEL || DEFAULT_LIVE_MODEL,
-          textModel: env.TEXT_MODEL || DEFAULT_TEXT_MODEL,
-          recordedAudioTranscriptionModel: env.TEXT_MODEL || DEFAULT_TEXT_MODEL,
-          ttsModel: env.TTS_MODEL || DEFAULT_TTS_MODEL,
-          liveVoiceModel: env.SARVAM_TTS_MODEL || DEFAULT_SARVAM_TTS_MODEL,
-          apiKeyBindingConfigured: Boolean(env.GEMINI_API_KEY),
-          liveVoiceKeyConfigured: Boolean(env.SARVAM_API_KEY),
+          service: 'UECP secure communications gateway',
+          liveIncidentTextConfigured: Boolean(env.GROQ_API_KEY),
+          liveIncidentVoiceConfigured: Boolean(env.SARVAM_API_KEY),
+          liveIncidentVoiceContextConfigured: Boolean(env.GROQ_API_KEY),
+          translationConfigured: Boolean(env.GEMINI_API_KEY),
           incidentDatabaseConfigured: Boolean(env.DB)
         }, 200, cors);
       }
@@ -102,6 +102,16 @@ export default {
         return createLiveVoice(request, env, cors, sarvamApiKey);
       }
 
+      if (isIncidentStream) {
+        const [groqApiKey, sarvamApiKey] = await Promise.all([
+          readSecret(env.GROQ_API_KEY),
+          readSecret(env.SARVAM_API_KEY)
+        ]);
+        if (!groqApiKey) return json({ error: 'GROQ_API_KEY is not configured for live incident text and voice interpretation' }, 503, cors);
+        if (!sarvamApiKey) return json({ error: 'SARVAM_API_KEY is not configured for live incident voice' }, 503, cors);
+        return streamIncidentResponse(url, env, cors, groqApiKey, sarvamApiKey, request.signal);
+      }
+
       const geminiApiKey = await readGeminiApiKey(env);
       if (!geminiApiKey) return json({ error: 'GEMINI_API_KEY is not configured' }, 503, cors);
 
@@ -111,11 +121,6 @@ export default {
 
       if (isTranscribe) {
         return transcribeAudio(request, env, cors, geminiApiKey);
-      }
-
-      if (isIncidentStream) {
-        const sarvamApiKey = await readSecret(env.SARVAM_API_KEY);
-        return await streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx, request.signal);
       }
 
       if (isTts) {
@@ -464,12 +469,13 @@ async function openLiveTranslation(request, env, geminiApiKey) {
   return new Response(null, { status: 101, webSocket: client });
 }
 
-function streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx, signal) {
+function streamIncidentResponse(url, env, cors, groqApiKey, sarvamApiKey, signal) {
   const incidentId = clean(url.searchParams.get('incidentId') || 'INC-0431', 40);
   if (!/^INC-[A-Z0-9-]+$/.test(incidentId)) return json({ error: 'invalid incident id' }, 400, cors);
   const encoder = new TextEncoder();
   const runId = crypto.randomUUID();
-  const textModel = env.TEXT_MODEL || DEFAULT_TEXT_MODEL;
+  const textModel = env.INCIDENT_TEXT_MODEL || DEFAULT_INCIDENT_TEXT_MODEL;
+  const transcriptionModel = env.VOICE_TRANSCRIPTION_MODEL || DEFAULT_VOICE_TRANSCRIPTION_MODEL;
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const pipeline = (async () => {
@@ -481,20 +487,22 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx,
       if (!incident) throw new Error('incident not found');
       const contextResults = await Promise.all([
         env.DB.prepare(`SELECT source_name, source_type, language_code, body, translated_body, sent_at
-          FROM incident_messages WHERE incident_id = ? ORDER BY sequence_no DESC LIMIT 14`).bind(incidentId).all(),
+          FROM incident_messages WHERE incident_id = ? ORDER BY sequence_no DESC LIMIT 6`).bind(incidentId).all(),
         env.DB.prepare(`SELECT title, status, priority, owner_agency_id, due_at
-          FROM incident_tasks WHERE incident_id = ? ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END LIMIT 10`).bind(incidentId).all(),
+          FROM incident_tasks WHERE incident_id = ? ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END LIMIT 5`).bind(incidentId).all(),
         env.DB.prepare(`SELECT r.callsign, r.resource_type, r.status, r.eta_minutes, a.short_name AS agency
           FROM incident_resources r JOIN agencies a ON a.id = r.agency_id
-          WHERE r.incident_id = ? ORDER BY r.status, r.callsign LIMIT 16`).bind(incidentId).all()
+          WHERE r.incident_id = ? ORDER BY r.status, r.callsign LIMIT 8`).bind(incidentId).all()
       ]);
       const videoAnalyticsEvent = createIcccVideoAnalyticsEvent(incident);
+      const voiceTurns = createVoiceTurnPlan();
       let previousVoiceSpeaker = '';
       await send('status', { runId, stage: 'context', label: 'Incident context loaded', incidentId });
       await send('source', { runId, source: 'ICCC Video Analytics API', payload: videoAnalyticsEvent });
-      for (let turn = 0; !signal?.aborted; turn += 1) {
-        await send('status', { runId, stage: 'thinking', label: `Choosing operational update ${turn + 1}`, turn: turn + 1 });
-        const desiredLanguage = chooseWeightedLanguage(turn, generated);
+      for (let turn = 0; turn < 10 && !signal?.aborted; turn += 1) {
+        await send('status', { runId, stage: 'thinking', label: `Preparing incident update ${turn + 1} of 10`, turn: turn + 1, total: 10 });
+        const voiceRequired = voiceTurns.has(turn);
+        const desiredLanguage = voiceRequired ? 'ta-IN' : chooseWeightedLanguage(turn, generated);
         const update = await chooseNextIncidentUpdate({
           incident,
           recentMessages: contextResults[0].results.slice().reverse(),
@@ -506,38 +514,49 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, sarvamApiKey, ctx,
           desiredLanguage,
           runId,
           model: textModel,
-          apiKey: geminiApiKey
+          apiKey: groqApiKey
         });
         update.id = `${runId}-${turn + 1}`;
         update.turn = turn + 1;
-        update.voiceRequired = shouldCreateVoice(turn, generated, update.voiceRequired);
+        update.voiceRequired = voiceRequired;
         generated.push(update);
         await send('message', update);
         if (update.voiceRequired) {
           await send('status', { runId, stage: 'voice', label: `Rendering ${update.unit} radio audio`, messageId: update.id });
           try {
-            if (!sarvamApiKey) throw new Error('Live voice is not configured: SARVAM_API_KEY is missing.');
             const audio = await createSpontaneousVoice(update, env, sarvamApiKey, previousVoiceSpeaker);
             previousVoiceSpeaker = audio.speaker;
-            await send('audio', { runId, messageId: update.id, languageCode: update.languageCode, ...audio });
+            await send('audio', {
+              runId,
+              messageId: update.id,
+              languageCode: update.languageCode,
+              audioBase64: audio.audioBase64,
+              mimeType: audio.mimeType,
+              speaker: audio.speaker
+            });
+            await send('status', { runId, stage: 'voice-context', label: `Interpreting ${update.unit} radio audio`, messageId: update.id });
+            const voiceTranscript = await transcribeIncidentVoice(audio.wav, update.languageCode, transcriptionModel, groqApiKey);
+            update.voiceTranscript = voiceTranscript;
+            await send('voice-context', { runId, messageId: update.id, transcript: voiceTranscript });
           } catch (error) {
-            console.warn(JSON.stringify({ message: 'incident voice skipped', runId, messageId: update.id, error: error instanceof Error ? error.message : String(error) }));
-            update.voiceRequired = false;
-            await send('voice-error', { runId, messageId: update.id, error: clean(error instanceof Error ? error.message : String(error), 260) });
+            const detail = clean(error instanceof Error ? error.message : String(error), 320);
+            console.error(JSON.stringify({ message: 'incident voice pipeline failed', runId, messageId: update.id, error: detail }));
+            await send('voice-error', { runId, messageId: update.id, error: detail });
+            throw error;
           }
         }
-        await waitForNextTurn(1400, signal);
+        if (turn < 9) await waitForNextTurn(nextTurnDelay(), signal);
       }
-      if (!signal?.aborted) await send('complete', { runId });
+      if (!signal?.aborted) await send('complete', { runId, totalMessages: 10, voiceMessages: voiceTurns.size });
     } catch (error) {
       if (signal?.aborted) return;
       console.error(JSON.stringify({ message: 'incident stream failed', runId, error: error instanceof Error ? error.message : String(error) }));
-      try { await send('stream-error', { runId, error: 'The live response run could not be completed. Please retry.' }); } catch {}
+      try { await send('stream-error', { runId, error: clean(error instanceof Error ? error.message : String(error), 320) }); } catch {}
     } finally {
       try { await writer.close(); } catch {}
     }
   })();
-  ctx.waitUntil(pipeline);
+  void pipeline;
 
   return new Response(readable, {
     headers: {
@@ -561,7 +580,7 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     'If mentioning an unresolved fact, label it unverified or request confirmation.',
     'Use Tamil most often and English when it is operationally natural. Ensure both languages appear early in the session.',
     `For this turn, write the spoken message in ${desiredLanguage === 'ta-IN' ? 'Tamil (ta-IN)' : 'English (en-IN)'} and set languageCode accordingly.`,
-    'Set voiceRequired true only for a concise update that would realistically be relayed over radio. Voice and text turns will continue throughout the session.',
+    'Keep the message to one or two concise operational sentences suitable for a real group chat or radio relay.',
     'Choose a realistic Chennai stakeholder and callsign. Do not call yourself an AI and do not mention model providers.',
     turn === 0
       ? 'This is the opening coordination message. Base it primarily on the ICCC Video Analytics API event and initiate the appropriate dispatch/verification loop.'
@@ -573,49 +592,69 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     `RECENT MESSAGES: ${JSON.stringify(recentMessages)}`,
     `OPEN TASKS: ${JSON.stringify(tasks)}`,
     `RESOURCES: ${JSON.stringify(resources)}`,
-    `UPDATES ALREADY GENERATED THIS RUN: ${JSON.stringify(generated)}`,
+    `ALL PRIOR LIVE GROUP UPDATES, INCLUDING TRANSCRIPTS OF VOICE ACTUALLY HEARD: ${JSON.stringify(generated.map(item => ({ speakerName: item.speakerName, agency: item.agency, unit: item.unit, channel: item.channel, languageCode: item.languageCode, message: item.message, englishTranslation: item.englishTranslation, voiceTranscript: item.voiceTranscript || '' })))}`,
     '',
     'Return exactly one new update matching the response schema.'
   ].join('\n');
 
+  const properties = {
+    speakerName: { type: 'string' },
+    agency: { type: 'string' },
+    unit: { type: 'string' },
+    channel: { type: 'string', enum: ['incident-chat', 'radio-relay', 'dispatch-console'] },
+    languageCode: { type: 'string', enum: ['ta-IN', 'en-IN'] },
+    message: { type: 'string' },
+    englishTranslation: { type: 'string' },
+    voiceRequired: { type: 'boolean' },
+    voice: { type: 'string', enum: ['Kore', 'Puck'] },
+    rationale: { type: 'string' }
+  };
   const requestBody = JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.9,
-        topP: 0.95,
-        maxOutputTokens: 520,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            speakerName: { type: 'STRING' },
-            agency: { type: 'STRING' },
-            unit: { type: 'STRING' },
-            channel: { type: 'STRING', enum: ['incident-chat', 'radio-relay', 'dispatch-console'] },
-            languageCode: { type: 'STRING', enum: ['ta-IN', 'en-IN'] },
-            message: { type: 'STRING' },
-            englishTranslation: { type: 'STRING' },
-            voiceRequired: { type: 'BOOLEAN' },
-            voice: { type: 'STRING', enum: ['Kore', 'Puck'] },
-            rationale: { type: 'STRING' }
-          },
-          required: ['speakerName', 'agency', 'unit', 'channel', 'languageCode', 'message', 'englishTranslation', 'voiceRequired', 'voice', 'rationale']
+    model,
+    messages: [
+      { role: 'system', content: 'Return one grounded emergency-operations update using the required schema. Never expose private reasoning.' },
+      { role: 'user', content: prompt }
+    ],
+    reasoning_effort: 'low',
+    reasoning_format: 'hidden',
+    temperature: 0.8,
+    max_completion_tokens: 400,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'incident_update',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties,
+          required: Object.keys(properties),
+          additionalProperties: false
         }
       }
-    });
+    }
+  });
   let upstream;
   let data;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    upstream = await fetch(`${GEMINI_HTTP}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    upstream = await fetch(`${GROQ_HTTP}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: requestBody
     });
     data = await upstream.json();
     if (upstream.ok || (upstream.status !== 429 && upstream.status < 500)) break;
+    if (attempt < 3) {
+      const retryHeader = Number.parseFloat(upstream.headers.get('retry-after') || '');
+      const retryMessage = String(data?.error?.message || '').match(/try again in\s+([0-9.]+)s/i);
+      const retrySeconds = Number.isFinite(retryHeader) ? retryHeader : Number.parseFloat(retryMessage?.[1] || '');
+      const retryDelay = Number.isFinite(retrySeconds)
+        ? Math.min(12000, Math.max(1500, Math.ceil(retrySeconds * 1000) + 650))
+        : 1400 * (attempt + 1);
+      await waitForNextTurn(retryDelay);
+    }
   }
-  if (!upstream.ok) throw new Error(`text generation failed (${upstream.status}): ${clean(data?.error?.message || '', 180)}`);
-  const raw = data?.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+  if (!upstream.ok) throw new Error(`Live text generation failed (${upstream.status}): ${clean(data?.error?.message || data?.error || 'upstream returned no detail', 220)}`);
+  const raw = data?.choices?.[0]?.message?.content?.trim();
   if (!raw) throw new Error('text generation returned no update');
   let output;
   try { output = JSON.parse(raw); } catch { throw new Error('text generation returned invalid structured output'); }
@@ -666,15 +705,24 @@ function chooseWeightedLanguage(turn, generated) {
   return draw[0] / 0xffffffff < 0.7 ? 'ta-IN' : 'en-IN';
 }
 
-function shouldCreateVoice(turn, generated, requested) {
-  if (turn === 0) return true;
-  const previous = generated.at(-1)?.voiceRequired;
-  const previousTwoAreText = generated.length >= 2 && generated.slice(-2).every(item => !item.voiceRequired);
-  if (previousTwoAreText) return true;
-  if (previous) return false;
+function createVoiceTurnPlan() {
+  const candidates = [1, 2, 3, 4, 5, 6, 7, 8];
+  for (let index = candidates.length - 1; index > 0; index -= 1) {
+    const draw = new Uint32Array(1);
+    crypto.getRandomValues(draw);
+    const swapIndex = draw[0] % (index + 1);
+    [candidates[index], candidates[swapIndex]] = [candidates[swapIndex], candidates[index]];
+  }
   const draw = new Uint32Array(1);
   crypto.getRandomValues(draw);
-  return requested || draw[0] / 0xffffffff < 0.55;
+  const count = draw[0] % 2 === 0 ? 3 : 4;
+  return new Set(candidates.slice(0, count));
+}
+
+function nextTurnDelay() {
+  const draw = new Uint32Array(1);
+  crypto.getRandomValues(draw);
+  return 11000 + (draw[0] % 5001);
 }
 
 function waitForNextTurn(milliseconds, signal) {
@@ -693,7 +741,30 @@ async function createSpontaneousVoice(update, env, sarvamApiKey, excludeSpeaker 
     voiceGender,
     excludeSpeaker
   }, env, sarvamApiKey);
-  return { audioBase64: encodeBase64(audio.wav.buffer), mimeType: 'audio/wav', speaker: audio.speaker };
+  return { wav: audio.wav, audioBase64: encodeBase64(audio.wav.buffer), mimeType: 'audio/wav', speaker: audio.speaker };
+}
+
+async function transcribeIncidentVoice(wav, languageCode, model, groqApiKey) {
+  const form = new FormData();
+  form.append('file', new Blob([wav], { type: 'audio/wav' }), 'incident-radio.wav');
+  form.append('model', model);
+  form.append('language', languageCode === 'ta-IN' ? 'ta' : 'en');
+  form.append('response_format', 'json');
+  form.append('temperature', '0');
+  const upstream = await fetch(`${GROQ_HTTP}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${groqApiKey}` },
+    body: form
+  });
+  let data;
+  try { data = await upstream.json(); } catch { data = null; }
+  if (!upstream.ok) {
+    const detail = clean(data?.error?.message || data?.error || 'upstream returned no detail', 220);
+    throw new Error(`Live voice interpretation failed (${upstream.status}): ${detail}`);
+  }
+  const transcript = clean(data?.text || '', 700);
+  if (!transcript) throw new Error('Live voice interpretation returned an empty transcript.');
+  return transcript;
 }
 
 async function synthesizeLiveVoice({ text, languageCode, voiceGender, excludeSpeaker = '' }, env, sarvamApiKey) {

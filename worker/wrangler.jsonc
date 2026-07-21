@@ -9,7 +9,9 @@
     "LIVE_MODEL": "gemini-3.5-live-translate-preview",
     "TEXT_MODEL": "gemini-2.5-pro",
     "TTS_MODEL": "gemini-2.5-pro-preview-tts",
-    "SARVAM_TTS_MODEL": "bulbul:v3"
+    "SARVAM_TTS_MODEL": "bulbul:v3",
+    "INCIDENT_TEXT_MODEL": "openai/gpt-oss-120b",
+    "VOICE_TRANSCRIPTION_MODEL": "whisper-large-v3"
   },
   "secrets_store_secrets": [
     {
@@ -21,6 +23,11 @@
       "binding": "SARVAM_API_KEY",
       "store_id": "e0660ebafc5e4cc99716ab5d12e72d6f",
       "secret_name": "SARVAM_API_KEY"
+    },
+    {
+      "binding": "GROQ_API_KEY",
+      "store_id": "e0660ebafc5e4cc99716ab5d12e72d6f",
+      "secret_name": "GROQ_API_KEY"
     }
   ],
   "d1_databases": [

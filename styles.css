@@ -380,6 +380,10 @@ body.gis-expanded { overflow: hidden; }
 .translation b { display: block; margin-bottom: 3px; font-size: 7px; letter-spacing: .08em; text-transform: uppercase; }
 .voice-rendering { margin-top: 9px; display: flex; align-items: center; gap: 6px; color: #555; font: 700 7px Roboto Mono, monospace; text-transform: uppercase; }
 .voice-rendering i { width: 7px; height: 7px; border-radius: 50%; background: var(--yellow); border: 1px solid #111; animation: pulse 1s infinite; }
+.voice-context { margin-top: 9px; padding: 8px 9px; display: grid; gap: 4px; border-left: 3px solid var(--yellow); background: #fffdea; }
+.voice-context b { font: 900 7px Roboto Mono, monospace; letter-spacing: .06em; }
+.voice-context span { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.voice-context.error { border-left-color: #c51d1d; background: #fff1f1; }
 .api-source-head { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .api-source-head b { font: 900 8px Roboto Mono, monospace; }
 .api-source-head span { color: #666; font-size: 7px; text-transform: uppercase; }

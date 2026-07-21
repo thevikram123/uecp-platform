@@ -149,7 +149,7 @@ const state = {
   liveVoiceTrialUrl: '',
   liveVoiceTrialSpeaker: '',
   liveVoiceTrialLoading: false,
-  showArchivedChat: true,
+  showArchivedChat: false,
   liveIncidentStarted: false,
   translationStarting: false,
   translationSetupReceived: false,
@@ -455,15 +455,24 @@ function renderComms() {
 }
 
 function liveResponsePanel() {
+  if(!state.showArchivedChat){
+    const running=state.agentStreamRunning;
+    const hasMessages=conversations.fire.length>0;
+    const label=running?'LIVE INCIDENT GROUP':hasMessages?'LIVE RUN COMPLETE':'READY FOR NEW RUN';
+    const detail=running?'Fresh chat and Tamil radio voice notes are arriving in sequence':'10 new text updates · 3–4 Tamil voice notes · shared voice context';
+    const action=running?'stop-agent-stream':'start-agent-stream';
+    const actionLabel=running?`${icon('x',13)} Stop run`:`${icon('activity',13)} ${hasMessages?'Start another run':'Start live run'}`;
+    return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse ${running?'active':''}"></span><div><b>${label}</b><small id="agentRunStatus">${detail}</small></div></div><div class="live-response-actions"><button class="button secondary" data-action="show-archived-chat">View sample conversation</button><button class="button ${running?'dark':'primary'}" id="agentStreamButton" data-action="${action}">${actionLabel}</button></div></section>`;
+  }
   const voiceLabel=state.liveVoiceTrialUrl?'Generate another Tamil voice':'Generate fresh Tamil voice';
   const replay=state.liveVoiceTrialUrl?`<button class="button secondary live-voice-trial" data-action="replay-live-voice">${icon('play',13)} Replay</button>`:'';
-  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>INCIDENT RESPONSE SAMPLE</b><small>Packaged field recordings plus rotating male and female Tamil radio voices</small></div></div><div class="live-response-actions"><span class="status-tag live">SAMPLE MODE</span>${replay}<button class="button primary live-voice-trial" data-action="try-live-voice" ${state.liveVoiceTrialLoading?'disabled':''}>${icon('radio',13)} ${voiceLabel}</button></div></section>`;
+  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>ARCHIVED INCIDENT SAMPLE</b><small>Packaged field recordings plus rotating male and female Tamil radio voices</small></div></div><div class="live-response-actions"><button class="button secondary" data-action="return-live-session">Return to live group</button>${replay}<button class="button primary live-voice-trial" data-action="try-live-voice" ${state.liveVoiceTrialLoading?'disabled':''}>${icon('radio',13)} ${voiceLabel}</button></div></section>`;
 }
 
 function currentFireConversation(){return state.showArchivedChat?archivedFireConversation:conversations.fire;}
 
 function liveIncidentEmptyState(){
-  return `<div class="live-incident-empty"><span class="live-empty-icon">${icon('activity',22)}</span><div><b>NO ACTIVE LIVE SESSION</b><h3>Start with a new ICCC camera alert</h3><p>The stream will begin from zero, then continue with new cross-agency messages and radio voice until you stop it.</p></div><button class="button primary" data-action="start-agent-stream">Start new live incident</button></div>`;
+  return `<div class="live-incident-empty"><span class="live-empty-icon">${icon('activity',22)}</span><div><b>EMPTY LIVE INCIDENT GROUP</b><h3>Start with a new ICCC camera alert</h3><p>A fresh run creates 10 contextual group messages with 3–4 Tamil radio voice notes placed between them. Each voice note is interpreted before the next update.</p></div><button class="button primary" data-action="start-agent-stream">Start live run</button></div>`;
 }
 
 function messageMarkup(m) {
@@ -476,6 +485,8 @@ function messageMarkup(m) {
   }
   if (m.type === 'file') body = `<div class="audio-bubble">${icon('camera',22)}<div><strong>${m.file}</strong><br><small>${m.detail}</small></div></div>`;
   if(m.voicePending)body+=`<div class="voice-rendering"><i></i> Fresh radio voice is rendering</div>`;
+  if(m.voiceInterpreted)body+=`<div class="voice-context"><b>VOICE INTERPRETED · CARRIED INTO NEXT UPDATE</b><span>${escapeHtml(m.voiceTranscript||'Radio content added to the incident context')}</span></div>`;
+  if(m.voiceError)body+=`<div class="voice-context error"><b>VOICE PIPELINE FAILED</b><span>${escapeHtml(m.voiceError)}</span></div>`;
   const tag=m.agentGenerated?'<span class="status-tag live">LIVE</span>':m.ai?'<span class="status-tag live">SYSTEM</span>':'';
   return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${escapeHtml(m.from)}</b><time>${escapeHtml(m.time)}</time>${tag}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${escapeHtml(m.translationModel||'Live translation')} · source → English</b>${escapeHtml(m.translation)}</div>`:''}</div></article>`;
 }
@@ -787,11 +798,16 @@ async function handleIncidentStreamEvent(event,payload) {
     const message=conversations.fire.find(item=>item.id===payload.messageId);if(message){message.type='audio';message.audioKey=audioKey;message.voicePending=false;message.duration='NEW';}
     renderConversationMessages();updateAgentRunUi('Fresh radio audio received · tap play on the latest voice update',true);return;
   }
-  if(event==='voice-error'){
-    const message=conversations.fire.find(item=>item.id===payload.messageId);if(message)message.voicePending=false;
-    renderConversationMessages();updateAgentRunUi('One voice relay was unavailable · live text coordination continues',true);return;
+  if(event==='voice-context'){
+    const message=conversations.fire.find(item=>item.id===payload.messageId);if(message){message.voicePending=false;message.voiceInterpreted=true;message.voiceTranscript=payload.transcript||'';}
+    renderConversationMessages();updateAgentRunUi('Radio voice interpreted · the next update will carry it forward',true);return;
   }
-  if(event==='complete'){updateAgentRunUi('Incident stream ended',false);return;}
+  if(event==='voice-error'){
+    const detail=payload.error||'Voice pipeline failed without an upstream explanation';
+    const message=conversations.fire.find(item=>item.id===payload.messageId);if(message){message.voicePending=false;message.voiceError=detail;}
+    renderConversationMessages();updateAgentRunUi(`Voice pipeline failed · ${detail}`,false);toast(`Voice pipeline failed · ${detail}`);return;
+  }
+  if(event==='complete'){updateAgentRunUi(`Run complete · ${payload.totalMessages||10} messages · ${payload.voiceMessages||3} Tamil voice notes`,false);return;}
   if(event==='stream-error')throw new Error(payload.error||'live stream failed');
 }
 
