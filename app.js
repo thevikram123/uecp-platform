@@ -980,17 +980,19 @@ function showLogin() {
 
 document.querySelector('#loginForm').addEventListener('submit',event=>{
   event.preventDefault();
-  const user=document.querySelector('#loginUser').value.trim();
-  const password=document.querySelector('#loginPassword').value;
+  const user=document.querySelector('#loginUser').value.trim().toLowerCase();
+  const password=document.querySelector('#loginPassword').value.trim();
   const error=document.querySelector('#loginError');
   if(user==='admin'&&password==='admin123'){
-    sessionStorage.setItem('uecpDemoAuthenticated','true');error.textContent='';showApplication();toast('Signed in · Chennai State Control demo');
+    try{sessionStorage.setItem('uecpDemoAuthenticated','true');}catch{}
+    error.textContent='';showApplication();toast('Signed in · Chennai State Control demo');
   }else{
     error.textContent='Incorrect user ID or password.';
     document.querySelector('#loginPassword').select();
   }
 });
-document.querySelector('#accountButton').onclick=()=>{sessionStorage.removeItem('uecpDemoAuthenticated');location.hash='overview';location.reload();};
+document.querySelector('#accountButton').onclick=()=>{try{sessionStorage.removeItem('uecpDemoAuthenticated');}catch{}location.hash='overview';location.reload();};
 
 hydrateIcons();
-if(sessionStorage.getItem('uecpDemoAuthenticated')==='true')showApplication();else showLogin();
+let demoAuthenticated=false;try{demoAuthenticated=sessionStorage.getItem('uecpDemoAuthenticated')==='true';}catch{}
+if(demoAuthenticated)showApplication();else showLogin();
