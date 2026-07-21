@@ -751,6 +751,10 @@ async function handleIncidentStreamEvent(event,payload) {
     const message=conversations.fire.find(item=>item.id===payload.messageId);if(message){message.type='audio';message.audioKey=audioKey;message.voicePending=false;message.duration='NEW';}
     renderConversationMessages();updateAgentRunUi('Fresh radio audio received · tap play on the latest voice update',true);return;
   }
+  if(event==='voice-error'){
+    const message=conversations.fire.find(item=>item.id===payload.messageId);if(message)message.voicePending=false;
+    renderConversationMessages();updateAgentRunUi('One voice relay was unavailable · live text coordination continues',true);return;
+  }
   if(event==='complete'){updateAgentRunUi(`Run complete · ${payload.count} context-aware updates · ${payload.voiced} fresh voice relays`,false);toast('Spontaneous response run completed');return;}
   if(event==='stream-error')throw new Error(payload.error||'live stream failed');
 }

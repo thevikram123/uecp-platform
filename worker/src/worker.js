@@ -453,8 +453,14 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, ctx) {
         await send('message', update);
         if (update.voiceRequired) {
           await send('status', { runId, stage: 'voice', label: `Rendering ${update.unit} radio audio`, messageId: update.id });
-          const audio = await createSpontaneousVoice(update, env, geminiApiKey);
-          await send('audio', { runId, messageId: update.id, languageCode: update.languageCode, ...audio });
+          try {
+            const audio = await createSpontaneousVoice(update, env, geminiApiKey);
+            await send('audio', { runId, messageId: update.id, languageCode: update.languageCode, ...audio });
+          } catch (error) {
+            console.warn(JSON.stringify({ message: 'incident voice skipped', runId, messageId: update.id, error: error instanceof Error ? error.message : String(error) }));
+            update.voiceRequired = false;
+            await send('voice-error', { runId, messageId: update.id, error: 'Fresh radio voice was unavailable; live text coordination continues.' });
+          }
         }
       }
       await send('complete', { runId, count: generated.length, voiced: generated.filter(item => item.voiceRequired).length });
@@ -506,10 +512,7 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     'Return exactly one new update matching the response schema.'
   ].join('\n');
 
-  const upstream = await fetch(`${GEMINI_HTTP}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
+  const requestBody = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.9,
@@ -533,9 +536,18 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
           required: ['speakerName', 'agency', 'unit', 'channel', 'languageCode', 'message', 'englishTranslation', 'voiceRequired', 'voice', 'rationale']
         }
       }
-    })
-  });
-  const data = await upstream.json();
+    });
+  let upstream;
+  let data;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    upstream = await fetch(`${GEMINI_HTTP}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: requestBody
+    });
+    data = await upstream.json();
+    if (upstream.ok || (upstream.status !== 429 && upstream.status < 500)) break;
+  }
   if (!upstream.ok) throw new Error(`text generation failed (${upstream.status}): ${clean(data?.error?.message || '', 180)}`);
   const raw = data?.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
   if (!raw) throw new Error('text generation returned no update');
@@ -596,12 +608,17 @@ async function createSpontaneousVoice(update, env, geminiApiKey) {
     response_format: { type: 'audio' },
     generation_config: { speech_config: [{ voice: update.voice }] }
   };
-  const upstream = await fetch(`${GEMINI_HTTP}/v1beta/interactions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey, 'Api-Revision': '2026-05-20' },
-    body: JSON.stringify(payload)
-  });
-  const data = await upstream.json();
+  let upstream;
+  let data;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    upstream = await fetch(`${GEMINI_HTTP}/v1beta/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey, 'Api-Revision': '2026-05-20' },
+      body: JSON.stringify(payload)
+    });
+    data = await upstream.json();
+    if (upstream.ok || (upstream.status !== 429 && upstream.status < 500)) break;
+  }
   if (!upstream.ok) throw new Error(`voice generation failed (${upstream.status})`);
   const audio = data?.output_audio || data?.steps
     ?.filter(step => step.type === 'model_output')
