@@ -36,14 +36,14 @@ function icon(name, size = 18) {
   return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[key] || ICONS.activity}</svg>`;
 }
 
-const DEFAULT_WORKER_URL = 'https://uecp-gemini-proxy.thevikram123.workers.dev';
+const DEFAULT_WORKER_URL = 'https://uecp-secure-gateway.thevikram123.workers.dev';
 const LOCAL_AUDIO_SAMPLES = Object.freeze({
   'first-scene-ta': 'assets/audio/first-scene-ta.mp3',
   'traffic-en': 'assets/audio/traffic-en.mp3',
   'relay-en': 'assets/audio/relay-en.mp3',
   'district-radio-ta': 'assets/audio/district-radio-ta.mp3'
 });
-
+let organizationLibrariesPromise;
 const people = [
   { id: 1, name: 'Insp. R. Selvakumar', initials: 'RS', role: 'Station House Officer', agency: 'Police', zone: 'T. Nagar', unit: 'TN-CTY-07', presence: 'online', method: 'App + PTT', language: 'Tamil / English', phone: '+91 ••••• 4182' },
   { id: 2, name: 'SI M. Anitha', initials: 'MA', role: 'Patrol Sub-Inspector', agency: 'Police', zone: 'T. Nagar', unit: 'PRV-114', presence: 'radio', method: 'Radio only', language: 'Tamil', phone: '+91 ••••• 7720' },
@@ -74,16 +74,20 @@ const conversations = {
   fire: [
     { from:'ERSS 112 · Call Taker 08', time:'14:30:03', text:'Multiple callers report a bus, lorry and car collision near Guindy flyover. The car has caught fire; persons may be trapped. Primary caller remains on line at a safe distance.' },
     { from:'ERSS 112 · Dispatcher Vignesh', time:'14:30:18', text:'CAD INC-0431 dispatched. Traffic Central, PRV-114, Fire TN-3 and two 108 ambulances assigned. NHAI road control and towing vendor notified. Dynamic group is primary coordination.' },
+    { from:'Assisted Call Intake · Tamil caller', time:'14:30:20', text:'கிண்டி மேம்பாலம் அருகே வாகனங்கள் மோதியுள்ளன. ஒரு காரில் தீ உள்ளது. தயவுசெய்து உடனடியாக உதவி அனுப்புங்கள்.', translation:'Vehicles have collided near Guindy flyover. A car is on fire. Please send help immediately.', ai:true },
+    { from:'ERSS 112 · Dispatcher Vignesh', time:'14:30:24', text:'Caller location matched to GST Road at Guindy flyover. Fire and collision details verified against a second call. Tamil radio relay approved for South Zone DMR Channel 3.' },
+    { from:'Automated Radio Relay · South Zone DMR Ch-3', time:'14:30:31', type:'audio', duration:'0:08', audioText:'ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.', audioLang:'ta-IN', text:'ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.', translation:'A car is on fire. An ambulance and fire tender are required immediately.', ai:true },
+    { from:'PRV-114 · DMR walkie-talkie', time:'14:30:37', text:'Relay received clearly on handheld radio. PRV-114 responding from Kathipara; ETA four minutes.' },
     { from:'SI M. Anitha · PRV-114 · first on scene', time:'14:34:28', type:'audio', duration:'0:11', audioText:'கிண்டி மேம்பாலம் அருகே மூன்று வாகனங்கள் மோதியுள்ளன. ஒரு கார் தீப்பிடித்துள்ளது. எரிபொருள் சாலையில் கசிகிறது. இரண்டாவது ஆம்புலன்ஸ் தேவை.', audioLang:'ta-IN', text:'கிண்டி மேம்பாலம் அருகே மூன்று வாகனங்கள் மோதியுள்ளன. ஒரு கார் தீப்பிடித்துள்ளது. எரிபொருள் சாலையில் கசிகிறது. இரண்டாவது ஆம்புலன்ஸ் தேவை.', translation:'Three vehicles have collided near Guindy flyover. One car is on fire. Fuel is leaking onto the road. A second ambulance is required.' },
     { from:'SFO K. Prabhu · FIRE-TN-3', time:'14:34:46', text:'Received directly, PRV-114. Keep everyone 50 metres upwind and stop ignition sources. We are two minutes out. Confirm whether the lorry carries hazardous goods.', mine:false },
     { from:'ERSS 112 · Dispatcher Vignesh', time:'14:35:01', text:'Vehicle registration lookup shows general freight; hazardous cargo not declared. Marking this unverified until the driver confirms.' },
     { from:'TI V. Aravind · Traffic Central', time:'14:35:14', type:'audio', duration:'0:07', audioText:'Traffic Central to all units. Both southbound lanes are closed at the previous junction. Emergency corridor is open on the shoulder.', audioLang:'en-IN', text:'Traffic Central to all units. Both southbound lanes are closed at the previous junction. Emergency corridor is open on the shoulder.' },
-    { from:'AI Action Agent · Human supervised', time:'14:35:21', text:'Actions tracked: 50 m hot zone active ✓ · two southbound lanes closed ✓ · emergency corridor open ✓ · lorry cargo verification pending. Sources linked.', ai:true },
+    { from:'Automated Action Tracker · Human supervised', time:'14:35:21', text:'Actions tracked: 50 m hot zone active ✓ · two southbound lanes closed ✓ · emergency corridor open ✓ · lorry cargo verification pending. Sources linked.', ai:true },
     { from:'Dr. S. Lakshmi · AMB-2291', time:'14:35:44', text:'PRV-114, triage point is 80 metres north, behind the barrier. Two red-priority patients and three walking wounded. Request hospital pre-alert for two trauma beds.', mine:false },
     { from:'ERSS 112 · Call Taker 08', time:'14:35:58', text:'Field picture received. Caller confirms the bus has been evacuated and is moving walking wounded toward the police cordon. I am keeping the caller away from the fuel spill.' },
     { from:'FIRE-TN-3 · SFO Prabhu', time:'14:36:22', text:'Fire knockdown started. Police, confirm all occupants are clear of the car. 108 may approach only from the north until we declare the hot zone safe.' },
     { from:'NHAI Road Control · Patrol 6', time:'14:36:50', text:'Portable barriers and spill-control vehicle dispatched. ETA six minutes. Recovery cranes are standing by outside the hot zone.' },
-    { from:'AI Voice Relay Agent', time:'14:37:40', type:'audio', duration:'0:14', audioText:'Automated UECP brief for the zonal Assistant Commissioner. A three vehicle collision with one vehicle fire has closed GST Road southbound near Guindy. Fire suppression, trauma triage and traffic diversion are active. Two red-priority patients are reported. Tap to join the incident group.', audioLang:'en-IN', text:'Dispatcher-approved voice brief queued to the unreachable zonal ACP. Source audio and field messages remain attached.', ai:true },
+    { from:'Automated Voice Relay', time:'14:37:40', type:'audio', duration:'0:14', audioText:'Automated UECP brief for the zonal Assistant Commissioner. A three vehicle collision with one vehicle fire has closed GST Road southbound near Guindy. Fire suppression, trauma triage and traffic diversion are active. Two red-priority patients are reported. Tap to join the incident group.', audioLang:'en-IN', text:'Dispatcher-approved voice brief queued to the unreachable zonal ACP. Source audio and field messages remain attached.', ai:true },
     { from:'You · State Control', time:'14:38:14', text:'ICCC Camera G-24 and live diversion map added. Dispatch remains on the loop; field commanders continue direct cross-agency coordination.', mine:true },
     { from:'ICCC Camera G-24', time:'14:39:02', type:'file', file:'G24_collision_overview.jpg', detail:'Incident approach and traffic queue · 1.8 MB' }
   ],
@@ -96,7 +100,7 @@ const conversations = {
   tngr: [
     { from:'PRV-114 · DMR radio', time:'14:34:28', type:'audio', duration:'0:08', audioText:'ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.', audioLang:'ta-IN', text:'ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.', translation:'A car is on fire. An ambulance and fire tender are required immediately.' },
     { from:'South Zone Control', time:'14:34:38', text:'PRV-114, Fire TN-3 and two ambulances are responding. Establish the hot zone and keep the emergency shoulder clear.' },
-    { from:'AI Comms Concierge', time:'14:28:41', text:'Radio traffic linked to INC-0431 with 94% confidence.', ai:true }
+    { from:'Communications Correlation Service', time:'14:28:41', text:'Radio traffic linked to INC-0431 with 94% confidence.', ai:true }
   ],
   erss: [
     { from:'Call Taker 112-08', time:'14:30:03', text:'Caller reports visible flames, approximately 20 people evacuating, no confirmed trapped persons.' },
@@ -129,6 +133,15 @@ const state = {
   gisTileLayer: null,
   gisLayers: {},
   gisBase: 'light',
+  organizationReactRoot: null,
+  organizationRender: null,
+  organizationFitView: null,
+  organizationQuery: '',
+  organizationAgency: 'All agencies',
+  organizationSelectedPerson: null,
+  organizationCollapsed: new Set(),
+  databaseLoaded: false,
+  composerMentionIds: [],
   nextAudioTime: 0,
   transcriptIn: '',
   transcriptOut: ''
@@ -136,8 +149,9 @@ const state = {
 
 const titles = {
   overview: ['COMMAND CENTRE','Operational overview'], directory: ['RESOURCE DISCOVERY','Jurisdiction directory'],
+  organization: ['RESPONSIBILITY NETWORK','Organization search'],
   incidents: ['INCIDENT COMMAND','Incident command'], comms: ['MULTI-AGENCY COLLABORATION','Unified communications'],
-  translate: ['AI COMMS CONCIERGE','Live translation'], integrations: ['FEDERATION & MIDDLEWARE','Integrations'],
+  translate: ['LANGUAGE SERVICES','Live translation'], integrations: ['FEDERATION & MIDDLEWARE','Integrations'],
   audit: ['GOVERNANCE','Evidence & audit']
 };
 
@@ -185,7 +199,7 @@ function renderOverview() {
       <section class="panel gis-panel" id="gisPanel"><div class="panel-head"><div><h3>Chennai live picture</h3><p>GIS · ICCC · ERSS · live field resources</p></div><button class="panel-action" data-action="map-fullscreen">Expand</button></div><div class="gis-map-shell"><div id="chennaiLiveMap" class="chennai-live-map" aria-label="Interactive Chennai incident and responder map"></div><div class="gis-live-badge"><i></i><span>LIVE</span><b>CHENNAI · 3 INCIDENTS</b></div><div class="gis-layer-panel"><span>OPERATIONAL LAYERS</span><div><button class="active" data-gis-layer="incidents">Incidents</button><button class="active" data-gis-layer="resources">Units</button><button class="active" data-gis-layer="zones">Hot zone</button><button class="active" data-gis-layer="cameras">CCTV</button></div><div class="gis-basemap"><button class="active" data-gis-base="light">Light GIS</button><button data-gis-base="satellite">Satellite</button></div></div><div class="gis-incident-hud"><span>PRIORITY INCIDENT</span><strong>INC-0431 · GUINDY</strong><small>Vehicle fire · 50 m hot zone · southbound closure</small><div><b>21</b> responders <b>6</b> agencies</div></div></div></section>
     </div>
     <div class="dashboard-grid">
-      <section class="panel"><div class="panel-head"><div><h3>AI communications brief</h3><p>Gemini 3.1 Flash-Lite · sources remain linked for verification</p></div><button class="button secondary" data-action="refresh-brief">${icon('refresh')} Regenerate brief</button></div><div class="timeline" id="briefPanel"><div class="timeline-item"><span class="timeline-time">14:49</span><div class="timeline-copy"><strong>Guindy collision and vehicle fire remains the priority incident.</strong><p>Fire suppression, trauma triage and full southbound diversion are active. Two red-priority patients reported; lorry cargo status remains unverified. NHAI barriers and spill control ETA is six minutes.</p></div></div><div class="timeline-item"><span class="timeline-time">14:42</span><div class="timeline-copy"><strong>Saidapet bridge traffic diverted.</strong><p>ICCC congestion score has reduced 19%. TANGEDCO isolation team ETA is 8 minutes.</p></div></div></div></section>
+      <section class="panel"><div class="panel-head"><div><h3>Communications brief</h3><p>Source-grounded · human verification required</p></div><button class="button secondary" data-action="refresh-brief">${icon('refresh')} Regenerate brief</button></div><div class="timeline" id="briefPanel"><div class="timeline-item"><span class="timeline-time">14:49</span><div class="timeline-copy"><strong>Guindy collision and vehicle fire remains the priority incident.</strong><p>Fire suppression, trauma triage and full southbound diversion are active. Two red-priority patients reported; lorry cargo status remains unverified. NHAI barriers and spill control ETA is six minutes.</p></div></div><div class="timeline-item"><span class="timeline-time">14:42</span><div class="timeline-copy"><strong>Saidapet bridge traffic diverted.</strong><p>ICCC congestion score has reduced 19%. TANGEDCO isolation team ETA is 8 minutes.</p></div></div></div></section>
       <section class="panel"><div class="panel-head"><div><h3>Reachability exceptions</h3><p>Concierge is watching these escalation chains</p></div></div><div class="responder-list"><div class="responder-row"><span class="avatar">LD</span><div><strong>PC L. Devi · Beat 22</strong><small>Unreachable 12 min · escalated to SHO</small></div><span class="radio-chip">AUTO</span></div><div class="responder-row"><span class="avatar">R3</span><div><strong>Rescue Tender 03</strong><small>Radio-only · DMR text delivered</small></div><span class="radio-chip">DMR</span></div><div class="responder-row"><span class="avatar">EB</span><div><strong>TANGEDCO duty engineer</strong><small>Voice brief queued after current call</small></div><span class="radio-chip">SIP</span></div></div></section>
     </div>
   </section>`;
@@ -298,12 +312,108 @@ function personCard(p) {
   return `<button class="person-card" data-person="${p.id}"><span class="presence ${p.presence}">${presenceLabel}</span><div class="card-top"><span class="avatar">${p.initials}</span><div><h3>${p.name}</h3><p class="role">${p.role}</p></div></div><div class="person-meta"><span>Agency<b>${p.agency}</b></span><span>Unit / callsign<b>${p.unit}</b></span><span>Jurisdiction<b>${p.zone}</b></span><span>Preferred reach<b>${p.method}</b></span></div><div class="person-actions"><span>${icon('radio',12)} PTT</span><span>${icon('phone',12)} Call</span><span>${icon('message',12)} Message</span></div></button>`;
 }
 
+function renderOrganization() {
+  const agencies=['All agencies',...new Set(people.map(person=>person.agency))];
+  return `<section class="view organization-view"><div class="view-head"><div><p class="eyebrow">SEARCH · TRACE · CONTACT</p><h2>Organization search</h2><p>Search the live duty structure, trace command responsibility and open the exact officer or unit required for an incident.</p></div><div class="view-actions"><span class="classification">CHENNAI · ON-DUTY STRUCTURE</span></div></div>
+    <div class="organization-layout"><aside class="organization-search-panel"><label class="form-label" for="organizationSearch">Officer, role, unit or agency</label><div class="organization-search-box">${icon('search')}<input id="organizationSearch" value="${escapeHtml(state.organizationQuery)}" placeholder="Start typing a name…" autocomplete="off"></div><label class="form-label" for="organizationAgency">Agency</label><select class="select" id="organizationAgency">${agencies.map(agency=>`<option ${state.organizationAgency===agency?'selected':''}>${agency}</option>`).join('')}</select><div class="organization-results" id="organizationResults"></div><div class="organization-key"><span><i class="key-node command"></i>Command</span><span><i class="key-node agency"></i>Agency</span><span><i class="key-node person"></i>Officer / unit</span></div></aside>
+      <section class="organization-canvas-panel"><header><div><h3>Operational responsibility network</h3><p>Drag to pan · scroll to zoom · select any officer to open their duty profile</p></div><button class="button secondary" data-action="fit-organization">Fit structure</button></header><div id="organizationChart" class="organization-chart" aria-label="Interactive Chennai emergency organization hierarchy"></div><div class="diagram-library-note"><span>${icon('network',13)} Interactive diagram view</span><small>Duty structure · current demonstration roster</small></div></section></div>
+  </section>`;
+}
+
+function organizationGraphData() {
+  const agencyMeta={
+    'Police':['Greater Chennai Police','South Zone · Law & Order'],
+    'Fire & Rescue':['TN Fire & Rescue Control','Chennai South Division'],
+    'EMRI 108':['EMRI 108 Operations','Chennai Medical Zone'],
+    'ERSS 112':['ERSS 112 State Centre','Chennai PSAP'],
+    'Traffic':['Chennai Traffic Control','Central Traffic Division'],
+    'Disaster Mgmt':['State Emergency Operations','Chennai District EOC'],
+    'TANGEDCO':['State Load Dispatch','Chennai South Circle']
+  };
+  const nodes=[{id:'state-control',type:'org',position:{x:840,y:24},data:{label:'Tamil Nadu State Control',sub:'Unified command',kind:'command'}}];
+  const edges=[];
+  Object.entries(agencyMeta).forEach(([agency,[label,sub]],agencyIndex)=>{
+    const agencyId=`agency-${agency.replace(/\W+/g,'-').toLowerCase()}`;
+    const x=agencyIndex*280;
+    nodes.push({id:agencyId,type:'org',position:{x,y:190},data:{label,sub,kind:'agency',agency}});
+    edges.push({id:`edge-state-${agencyId}`,source:'state-control',target:agencyId,type:'step'});
+    const agencyPeople=people.filter(person=>person.agency===agency);
+    agencyPeople.forEach((person,personIndex)=>{
+      const personId=`person-${person.id}`;
+      nodes.push({id:personId,type:'org',position:{x:x+(personIndex-(agencyPeople.length-1)/2)*190,y:380},data:{label:person.name,sub:`${person.role} · ${person.unit}`,kind:'person',agency,personId:person.id,presence:person.presence}});
+      edges.push({id:`edge-${agencyId}-${personId}`,source:agencyId,target:personId,type:'step'});
+    });
+  });
+  return {nodes,edges};
+}
+
+async function initOrganizationChart() {
+  const container=document.querySelector('#organizationChart');if(!container)return;
+  container.innerHTML='<div class="organization-loading">Loading duty structure…</div>';
+  try {
+    organizationLibrariesPromise ||= Promise.all([
+      import('https://esm.sh/react@19.0.0'),
+      import('https://esm.sh/react-dom@19.0.0/client'),
+      import('https://esm.sh/@xyflow/react@12.10.2?deps=react@19.0.0,react-dom@19.0.0')
+    ]);
+    const [ReactModule,ReactDOM,Flow]=await organizationLibrariesPromise;
+    if(document.querySelector('#organizationChart')!==container)return;
+    const React=ReactModule.default||ReactModule;
+    const {ReactFlow,Controls,MiniMap,Background,BackgroundVariant,Handle,Position}=Flow;
+    const FlowNode=({data})=>React.createElement('div',{className:`organization-flow-node ${data.kind} ${data.presence||''} ${data.highlighted?'highlighted':''}`},
+      data.kind!=='command'&&React.createElement(Handle,{type:'target',position:Position.Top}),
+      React.createElement('span',{className:'organization-node-type'},data.kind==='command'?'STATE COMMAND':data.kind==='agency'?'AGENCY COMMAND':'DUTY CONTACT'),
+      data.kind==='agency'&&React.createElement('span',{className:'organization-collapse',title:data.collapsed?'Expand branch':'Collapse branch'},data.collapsed?'+':'−'),
+      React.createElement('strong',null,data.label),React.createElement('small',null,data.sub),
+      data.kind!=='person'&&React.createElement(Handle,{type:'source',position:Position.Bottom})
+    );
+    const OrganizationFlow=()=>{
+      const graph=organizationGraphData();
+      const query=state.organizationQuery.toLowerCase();const agency=state.organizationAgency;
+      const matchingIds=new Set(people.filter(person=>(agency==='All agencies'||person.agency===agency)&&`${person.name} ${person.role} ${person.unit} ${person.agency} ${person.zone}`.toLowerCase().includes(query)).map(person=>person.id));
+      const filtering=Boolean(query)||agency!=='All agencies';
+      const selected=people.find(person=>person.id===state.organizationSelectedPerson);
+      const activeAgency=selected?.agency;
+      const visibleNodes=graph.nodes.filter(node=>node.data.kind!=='person'||!state.organizationCollapsed.has(node.data.agency)||matchingIds.has(node.data.personId));
+      const visibleIds=new Set(visibleNodes.map(node=>node.id));
+      const nodes=visibleNodes.map(node=>({...node,data:{...node.data,collapsed:node.data.kind==='agency'&&state.organizationCollapsed.has(node.data.agency),highlighted:node.data.personId===state.organizationSelectedPerson||matchingIds.has(node.data.personId)||(activeAgency&&node.data.agency===activeAgency&&node.data.kind==='agency')},className:filtering&&node.data.kind==='person'&&!matchingIds.has(node.data.personId)?'organization-dim':''}));
+      const edges=graph.edges.filter(edge=>visibleIds.has(edge.source)&&visibleIds.has(edge.target)).map(edge=>({...edge,animated:Boolean(activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())),style:{stroke:activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())?'#111111':'#b8b8b8',strokeWidth:activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())?2.5:1.2}}));
+      return React.createElement(ReactFlow,{nodes,edges,nodeTypes:{org:FlowNode},fitView:true,fitViewOptions:{padding:.16},minZoom:.38,maxZoom:1.8,nodesDraggable:true,nodesConnectable:false,elementsSelectable:true,onInit:instance=>{state.organizationFitView=()=>instance.fitView({padding:.16,duration:250});},onNodeClick:(_,node)=>{if(node.data.kind==='agency'){if(state.organizationCollapsed.has(node.data.agency))state.organizationCollapsed.delete(node.data.agency);else state.organizationCollapsed.add(node.data.agency);state.organizationRender?.();setTimeout(()=>state.organizationFitView?.(),30);return;}if(node.data.personId){state.organizationSelectedPerson=Number(node.data.personId);state.organizationRender?.();openPerson(Number(node.data.personId));}}},
+        React.createElement(Background,{variant:BackgroundVariant.Dots,gap:24,size:1,color:'#00000018'}),
+        React.createElement(Controls,{showInteractive:false}),
+        React.createElement(MiniMap,{nodeColor:node=>node.data.kind==='command'?'#ffe600':node.data.kind==='agency'?'#111111':'#ffffff',maskColor:'#ffffffbb',pannable:true,zoomable:true})
+      );
+    };
+    container.innerHTML='';state.organizationReactRoot=ReactDOM.createRoot(container);
+    state.organizationRender=()=>state.organizationReactRoot?.render(React.createElement(OrganizationFlow));
+    state.organizationRender();updateOrganizationSearch();
+  } catch(error) {
+    container.innerHTML='<div class="organization-fallback"><strong>Organization diagram unavailable</strong><span>The searchable duty roster remains available.</span></div>';updateOrganizationSearch();
+  }
+}
+
+function updateOrganizationSearch() {
+  const query=(document.querySelector('#organizationSearch')?.value||state.organizationQuery).trim().toLowerCase();
+  const agency=document.querySelector('#organizationAgency')?.value||state.organizationAgency;
+  state.organizationQuery=query;state.organizationAgency=agency;
+  const matches=people.filter(person=>(agency==='All agencies'||person.agency===agency)&&`${person.name} ${person.role} ${person.unit} ${person.agency} ${person.zone}`.toLowerCase().includes(query));
+  if(query)matches.forEach(person=>state.organizationCollapsed.delete(person.agency));
+  const results=document.querySelector('#organizationResults');
+  if(results)results.innerHTML=`<header><b>${matches.length}</b><span>matching duty contacts</span></header>${matches.map(person=>`<button data-organization-person="${person.id}"><span class="avatar">${person.initials}</span><span><b>${person.name}</b><small>${person.role} · ${person.unit}</small></span><i class="presence ${person.presence}"></i></button>`).join('')||'<p>No matching duty contact</p>'}`;
+  results?.querySelectorAll('[data-organization-person]').forEach(button=>button.onclick=()=>{const id=Number(button.dataset.organizationPerson);state.organizationSelectedPerson=id;highlightOrganizationPerson(id);openPerson(id);});
+  state.organizationRender?.();
+}
+
+function highlightOrganizationPerson(personId) {
+  state.organizationSelectedPerson=personId;state.organizationRender?.();
+}
+
 function renderIncidents() {
   const selected = incidents.find(i => i.id === state.selectedIncident) || incidents[0];
   const content = state.commandTab === 'timeline' ? `<div class="timeline"><div class="timeline-item"><span class="timeline-time">14:30:18</span><div class="timeline-copy"><strong>ERSS dispatch creates command group</strong><p>Multiple 112 calls matched near Guindy flyover. Traffic, local police, Fire, 108, NHAI road control and towing stakeholders were resolved and notified.</p></div></div><div class="timeline-item"><span class="timeline-time">14:31:02</span><div class="timeline-copy"><strong>South Zone radio net bridged</strong><p>RoIP gateway TN-3 patched DMR Channel 3 into this incident group; recording and field GPS correlation started.</p></div></div><div class="timeline-item"><span class="timeline-time">14:34:28</span><div class="timeline-copy"><strong>First-on-scene report translated</strong><p>Tamil radio identified a three-vehicle collision, vehicle fire and fuel spill. Second ambulance request verified by dispatcher.</p></div></div><div class="timeline-item"><span class="timeline-time">14:35:14</span><div class="timeline-copy"><strong>Traffic diversion and emergency corridor active</strong><p>Traffic Central closed southbound lanes while retaining shoulder access for Fire and 108.</p></div></div><div class="timeline-item"><span class="timeline-time">14:35:44</span><div class="timeline-copy"><strong>Trauma triage established</strong><p>AMB-2291 reports two red-priority patients and three walking wounded; hospital pre-alert initiated.</p></div></div><div class="timeline-item"><span class="timeline-time">14:36:50</span><div class="timeline-copy"><strong>Road recovery resources mobilized</strong><p>NHAI barriers, spill control and recovery cranes dispatched; entry remains subject to Fire hot-zone clearance.</p></div></div></div>` : `<div class="responder-list">${people.slice(0,6).map(p=>`<div class="responder-row"><span class="avatar">${p.initials}</span><div><strong>${p.name}</strong><small>${p.role} · ${p.unit}</small></div><span class="presence ${p.presence}">${p.presence==='online'?'Available':p.presence==='radio'?'Radio':'Offline'}</span></div>`).join('')}</div>`;
   return `<section class="view"><div class="view-head"><div><p class="eyebrow">DYNAMIC RESPONSE GROUPS</p><h2>Incident command</h2><p>CAD and ICCC events become governed talk-groups, chat rooms, file spaces and evidence records.</p></div><div class="view-actions"><button class="button secondary" data-action="upload">${icon('file')} Add file</button><button class="button primary" data-action="new-incident">${icon('plus')} Create incident</button></div></div>
     <div class="incident-workspace"><section><div class="panel"><div class="panel-head"><div><h3>Active incidents</h3><p>Three live command groups</p></div></div><div class="incident-list">${incidents.map(incidentRow).join('')}</div></div><div class="incident-detail" style="margin-top:12px"><div class="incident-banner"><div><span class="severity-tag ${selected.severity.toLowerCase()}">${selected.severity}</span><h3>${selected.title}</h3><p>${selected.id} · ${selected.location} · source ${selected.source}</p></div><div class="view-actions"><button class="button secondary" data-action="open-channel">${icon('message')} Open group</button><button class="button dark" data-action="join-ptt">${icon('radio')} Join PTT</button></div></div><div class="command-tabs"><button class="command-tab ${state.commandTab==='timeline'?'active':''}" data-command-tab="timeline">Operational timeline</button><button class="command-tab ${state.commandTab==='responders'?'active':''}" data-command-tab="responders">Responders (21)</button><button class="command-tab" data-action="files">Files (6)</button></div>${content}</div></section>
-      <aside><section class="panel"><div class="panel-head"><div><h3>Command brief</h3><p>Verified 14:49 · AI-assisted</p></div><button class="panel-action" data-action="refresh-brief">Refresh</button></div><div style="padding:15px;font-size:10px;line-height:1.65"><ol style="padding-left:17px;margin:0;display:grid;gap:8px"><li>Bus, lorry and car involved; car fire suppression is in progress.</li><li>50 m hot zone established; lorry cargo declaration remains unverified.</li><li>Southbound GST Road closed with an emergency shoulder corridor.</li><li>Two red-priority patients and three walking wounded under 108 triage.</li><li>NHAI spill control, barriers and recovery cranes mobilized outside the hot zone.</li></ol><div class="privacy-note" style="margin-top:14px">${icon('shield')} Every line links to source audio, CAD event or responder update. Human verification required before external release.</div></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h3>Bridged resources</h3><p>Field channels and live context</p></div></div><div class="responder-list"><div class="responder-row"><span class="avatar">R3</span><div><strong>South Zone DMR Ch-3</strong><small>RoIP TN-3 · Police + Fire</small></div><span class="status-tag live">Live</span></div><div class="responder-row"><span class="avatar">G24</span><div><strong>ICCC Camera G-24</strong><small>Guindy flyover · 1080p</small></div><span class="status-tag live">Live</span></div><div class="responder-row"><span class="avatar">112</span><div><strong>ERSS CAD event</strong><small>Call taker + dispatch status sync</small></div><span class="status-tag live">Sync</span></div></div></section></aside>
+      <aside><section class="panel"><div class="panel-head"><div><h3>Command brief</h3><p>Source-verified 14:49</p></div><button class="panel-action" data-action="refresh-brief">Refresh</button></div><div style="padding:15px;font-size:10px;line-height:1.65"><ol style="padding-left:17px;margin:0;display:grid;gap:8px"><li>Bus, lorry and car involved; car fire suppression is in progress.</li><li>50 m hot zone established; lorry cargo declaration remains unverified.</li><li>Southbound GST Road closed with an emergency shoulder corridor.</li><li>Two red-priority patients and three walking wounded under 108 triage.</li><li>NHAI spill control, barriers and recovery cranes mobilized outside the hot zone.</li></ol><div class="privacy-note" style="margin-top:14px">${icon('shield')} Every line links to source audio, CAD event or responder update. Human verification required before external release.</div></div></section><section class="panel" style="margin-top:12px"><div class="panel-head"><div><h3>Bridged resources</h3><p>Field channels and live context</p></div></div><div class="responder-list"><div class="responder-row"><span class="avatar">R3</span><div><strong>South Zone DMR Ch-3</strong><small>RoIP TN-3 · Police + Fire</small></div><span class="status-tag live">Live</span></div><div class="responder-row"><span class="avatar">G24</span><div><strong>ICCC Camera G-24</strong><small>Guindy flyover · 1080p</small></div><span class="status-tag live">Live</span></div><div class="responder-row"><span class="avatar">112</span><div><strong>ERSS CAD event</strong><small>Call taker + dispatch status sync</small></div><span class="status-tag live">Sync</span></div></div></section></aside>
     </div></section>`;
 }
 
@@ -312,22 +422,23 @@ function renderComms() {
   const messages = conversations[channel.id] || [];
   return `<section class="view"><div class="view-head"><div><p class="eyebrow">VOICE · PTT · CHAT · FILES</p><h2>Unified communications</h2><p>Sample operational conversations show officers how radio, app, SIP and translated messages converge in one incident record.</p></div><div class="view-actions"><button class="button secondary" data-action="new-group">${icon('users')} New group</button></div></div>
     <div class="comms-layout"><aside class="channel-list"><div class="channel-search"><input class="text-input" placeholder="Search channels"></div>${channels.map(c=>`<button class="channel-item ${c.id===channel.id?'active':''}" data-channel="${c.id}"><span class="channel-icon">${icon(c.icon)}</span><div><strong>${c.name}</strong><small>${c.meta}</small></div><time>${c.time}</time></button>`).join('')}</aside>
-      <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header><div class="message-stream" id="messageStream">${messages.map(messageMarkup).join('')}</div><div class="composer"><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group…"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
+      <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header><div class="message-stream" id="messageStream">${messages.map(messageMarkup).join('')}</div><div class="composer"><div class="mention-picker" id="mentionPicker" hidden></div><button class="icon-button mention-trigger" data-action="mention-trigger" aria-label="Mention a person or unit">@</button><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group · type @ to find anyone"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
     </div></section>`;
 }
 
 function messageMarkup(m) {
   let body = m.text || '';
-  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><small class="audio-model">Approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} voice · Gemini TTS fallback</small><div style="margin-top:9px">${m.text}</div>`;
+  (m.mentions||[]).forEach(id=>{const person=people.find(item=>item.id===id);if(person)body=body.replaceAll(`@${escapeHtml(person.name)}`,`<button class="mention-token" data-person="${person.id}">@${escapeHtml(person.name)}</button>`);});
+  if (m.type === 'audio') body = `<div class="audio-bubble"><button data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}" aria-label="Play approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio sample">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration}</b></div><small class="audio-model">Approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} operational voice</small><div style="margin-top:9px">${m.text}</div>`;
   if (m.type === 'file') body = `<div class="audio-bubble">${icon('camera',22)}<div><strong>${m.file}</strong><br><small>${m.detail}</small></div></div>`;
-  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${m.from}</b><time>${m.time}</time>${m.ai?'<span class="status-tag live">AI</span>':''}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${m.translationModel||'Gemini 3.5 Live'} · source → English</b>${m.translation}</div>`:''}</div></article>`;
+  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${m.from}</b><time>${m.time}</time>${m.ai?'<span class="status-tag live">SYSTEM</span>':''}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${m.translationModel||'Live translation'} · source → English</b>${m.translation}</div>`:''}</div></article>`;
 }
 
 function sampleIdForMessage(message) {
   if (message.sampleId) return message.sampleId;
   if (message.from.startsWith('SI M. Anitha')) return 'first-scene-ta';
   if (message.from.startsWith('TI V. Aravind')) return 'traffic-en';
-  if (message.from.startsWith('AI Voice Relay')) return 'relay-en';
+  if (message.from.includes('Voice Relay')) return 'relay-en';
   return 'district-radio-ta';
 }
 
@@ -336,11 +447,11 @@ const languages = [['ta','தமிழ் · Tamil'],['en','English'],['hi','ह
 function renderTranslate() {
   const workerUrl = localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL;
   const target = localStorage.getItem('uecpTargetLanguage') || 'en';
-  return `<section class="view"><div class="view-head"><div><p class="eyebrow">GEMINI LIVE THROUGH SECURE WORKER</p><h2>Real-time speech translation</h2><p>Low-latency Tamil ↔ English and multilingual interpretation for cross-agency calls and bridged radio traffic.</p></div><div class="view-actions"><span class="classification">PILOT · HUMAN SUPERVISED</span></div></div>
-    <div class="translate-layout"><section class="translate-console"><div class="translate-hero"><div><p class="eyebrow">LIVE INTERPRETER</p><h3>Speak naturally. Hear the translation.</h3><p>Continuous audio translation · source and output transcripts retained with consent</p></div><span class="model-chip">gemini-3.5-live-translate-preview</span></div><div class="language-route"><label>Input language<select id="sourceLanguage"><option value="auto">Auto-detect</option>${languages.map(([c,n])=>`<option value="${c}">${n}</option>`).join('')}</select></label><span class="route-arrow">${icon('languages')}</span><label>Translate into<select id="targetLanguage">${languages.map(([c,n])=>`<option value="${c}" ${c===target?'selected':''}>${n}</option>`).join('')}</select></label></div>
+  return `<section class="view"><div class="view-head"><div><p class="eyebrow">SECURE LIVE TRANSLATION</p><h2>Real-time speech translation</h2><p>Low-latency Tamil ↔ English and multilingual interpretation for cross-agency calls and bridged radio traffic.</p></div><div class="view-actions"><span class="classification">PILOT · HUMAN SUPERVISED</span></div></div>
+    <div class="translate-layout"><section class="translate-console"><div class="translate-hero"><div><p class="eyebrow">LIVE INTERPRETER</p><h3>Speak naturally. Hear the translation.</h3><p>Continuous audio translation · source and output transcripts retained with consent</p></div><span class="model-chip">Live multilingual audio</span></div><div class="language-route"><label>Input language<select id="sourceLanguage"><option value="auto">Auto-detect</option>${languages.map(([c,n])=>`<option value="${c}">${n}</option>`).join('')}</select></label><span class="route-arrow">${icon('languages')}</span><label>Translate into<select id="targetLanguage">${languages.map(([c,n])=>`<option value="${c}" ${c===target?'selected':''}>${n}</option>`).join('')}</select></label></div>
       <div class="transcript-stage"><section class="transcript-card"><header><span>Source transcript</span><span id="inputLanguageCode">AUTO</span></header><div class="transcript-copy ${state.transcriptIn?'':'transcript-placeholder'}" id="inputTranscript">${state.transcriptIn || 'Source speech will appear here as the radio or officer speaks…'}</div><footer class="transcript-foot"><span>16 kHz PCM input</span><span id="inputConfidence">waiting</span></footer></section><section class="transcript-card"><header><span>Translated transcript</span><span id="outputLanguageCode">${target.toUpperCase()}</span></header><div class="transcript-copy ${state.transcriptOut?'':'transcript-placeholder'}" id="outputTranscript">${state.transcriptOut || 'The translated transcript will appear here and audio will play automatically…'}</div><footer class="transcript-foot"><span>24 kHz PCM output</span><span id="outputState">waiting</span></footer></section></div>
       <div class="translate-controls"><button class="mic-button ${state.translating?'active':''}" id="translateMic" aria-label="${state.translating?'Stop':'Start'} live translation">${icon(state.translating?'x':'mic')}</button><div class="session-state"><strong id="sessionStatus">${state.translating?'Live translation active':'Ready to translate'}</strong><small id="sessionDetail">${state.translating?'Listening for speech':'Select a target language, then start'}</small></div><button class="button secondary" data-action="load-translation-demo">Play sample flow</button></div></section>
-      <aside class="settings-panel"><div class="panel-head"><div><h3>Secure gateway</h3><p>API key remains in Cloudflare</p></div>${icon('shield')}</div><div class="settings-body"><label>Cloudflare Worker URL<input id="workerUrl" value="${workerUrl}" placeholder="https://uecp-gemini-proxy.workers.dev"></label><button class="button secondary connection-test" data-action="test-worker">${icon('activity')} Test connection</button><div class="privacy-note">${icon('lock')} GitHub Pages never receives the Gemini API key. The Worker validates the origin, rate-limits sessions and enforces approved model identifiers.</div><div class="mini-stat-grid"><div class="mini-stat"><span>Text model</span><b>3.1 Flash-Lite</b></div><div class="mini-stat"><span>Voice model</span><b>3.5 Live</b></div><div class="mini-stat"><span>Input</span><b>16 kHz</b></div><div class="mini-stat"><span>Output</span><b>24 kHz</b></div></div><label><input type="checkbox" id="echoLanguage" style="width:auto;height:auto;margin:0 6px 0 0" checked> Echo speech already in target language</label><button class="button dark" data-action="save-worker">Save gateway settings</button></div></aside>
+      <aside class="settings-panel"><div class="panel-head"><div><h3>Secure gateway</h3><p>Provider credentials remain server-side</p></div>${icon('shield')}</div><div class="settings-body"><label>Cloudflare Worker URL<input id="workerUrl" value="${workerUrl}" placeholder="https://uecp-secure-gateway.workers.dev"></label><button class="button secondary connection-test" data-action="test-worker">${icon('activity')} Test connection</button><div class="privacy-note">${icon('lock')} GitHub Pages never receives provider credentials. The Worker validates the origin, rate-limits sessions and enforces approved audio capabilities.</div><div class="mini-stat-grid"><div class="mini-stat"><span>Recorded audio</span><b>Transcription</b></div><div class="mini-stat"><span>Live audio</span><b>Translation</b></div><div class="mini-stat"><span>Input</span><b>16 kHz</b></div><div class="mini-stat"><span>Output</span><b>24 kHz</b></div></div><label><input type="checkbox" id="echoLanguage" style="width:auto;height:auto;margin:0 6px 0 0" checked> Echo speech already in target language</label><button class="button dark" data-action="save-worker">Save gateway settings</button></div></aside>
     </div></section>`;
 }
 
@@ -353,32 +464,34 @@ function renderIntegrations() {
     ['IP-PBX / PSTN','phone','SIP trunk','Desk phone · relay calls','18 ms'],
     ['Evidence store','shield','WORM + hash chain','Voice · files · audit trail','current']
   ];
-  return `<section class="view"><div class="view-head"><div><p class="eyebrow">OEM-NEUTRAL FEDERATION</p><h2>Integration & middleware fabric</h2><p>Existing radio fleets, CAD, ICCC and telephony remain operational while UECP provides one governed communication layer.</p></div><div class="view-actions"><button class="button secondary" data-action="refresh-integrations">${icon('refresh')} Refresh health</button></div></div><div class="integration-grid">${items.map(i=>`<article class="integration-card"><header><span class="integration-logo">${icon(i[1])}</span><div><h3>${i[0]}</h3><p>${i[2]}<br>${i[3]}</p></div></header><footer><span><i class="agency-dot" style="background:#16803c"></i>Connected</span><code>${i[4]}</code></footer></article>`).join('')}</div><div class="architecture-strip"><div class="arch-node"><strong>FIELD & RADIO</strong><small>Existing analog / DMR fleets, mobile apps, MDTs</small></div><div class="arch-arrow">→</div><div class="arch-node"><strong>RoIP + GSWAN</strong><small>Donor radio gateways, VPN, resilient paths</small></div><div class="arch-arrow">→</div><div class="arch-node accent"><strong>UECP CORE · DC/DRC</strong><small>MCX, directory, incidents, messaging, AI concierge</small></div><div class="arch-arrow">↔</div><div class="arch-node"><strong>EXTERNAL SYSTEMS</strong><small>ERSS, ICCC, CCTNS, IP-PBX and state GIS</small></div></div></section>`;
+  return `<section class="view"><div class="view-head"><div><p class="eyebrow">OEM-NEUTRAL FEDERATION</p><h2>Integration & middleware fabric</h2><p>Existing radio fleets, CAD, ICCC and telephony remain operational while UECP provides one governed communication layer.</p></div><div class="view-actions"><button class="button secondary" data-action="refresh-integrations">${icon('refresh')} Refresh health</button></div></div><div class="integration-grid">${items.map(i=>`<article class="integration-card"><header><span class="integration-logo">${icon(i[1])}</span><div><h3>${i[0]}</h3><p>${i[2]}<br>${i[3]}</p></div></header><footer><span><i class="agency-dot" style="background:#16803c"></i>Connected</span><code>${i[4]}</code></footer></article>`).join('')}</div><div class="architecture-strip"><div class="arch-node"><strong>FIELD & RADIO</strong><small>Existing analog / DMR fleets, mobile apps, MDTs</small></div><div class="arch-arrow">→</div><div class="arch-node"><strong>RoIP + GSWAN</strong><small>Donor radio gateways, VPN, resilient paths</small></div><div class="arch-arrow">→</div><div class="arch-node accent"><strong>UECP CORE · DC/DRC</strong><small>MCX, directory, incidents, messaging, automation services</small></div><div class="arch-arrow">↔</div><div class="arch-node"><strong>EXTERNAL SYSTEMS</strong><small>ERSS, ICCC, CCTNS, IP-PBX and state GIS</small></div></div></section>`;
 }
 
 function renderAudit() {
   const rows = [
-    ['14:49:12','AI brief regenerated','INC-0431','ADGP A. Karthik','a8f7…90c2','Verified'],
+    ['14:49:12','Command brief regenerated','INC-0431','ADGP A. Karthik','a8f7…90c2','Verified'],
     ['14:47:26','Patient status received','AMB-2291','Dr. S. Lakshmi','b112…7dd9','Ingested'],
     ['14:43:05','Bot relay approved','FIRE DMR Ch-3','Dispatcher Vignesh','cc84…02e1','Approved'],
     ['14:39:02','Camera snapshot attached','ICCC CAM-17','System adapter','348e…fb16','Ingested'],
-    ['14:36:42','Tamil radio translated','FIRE-TN-3','Gemini Live gateway','714a…aec4','AI output'],
+    ['14:36:42','Tamil radio translated','FIRE-TN-3','Secure language gateway','714a…aec4','Automated'],
     ['14:31:02','Radio bridge opened','DMR Ch-3','SFO K. Prabhu','4df0…a229','Authorized'],
     ['14:30:18','Incident group created','INC-0431','ERSS CAD adapter','f938…0dd1','Automated']
   ];
-  return `<section class="view"><div class="view-head"><div><p class="eyebrow">CHAIN OF CUSTODY</p><h2>Evidence & audit</h2><p>Every message, file, translation, radio action and AI brief retains source linkage and an immutable integrity record.</p></div><div class="view-actions"><button class="button secondary" data-action="verify-chain">${icon('shield')} Verify hash chain</button><button class="button primary" data-action="export-audit">${icon('file')} Export manifest</button></div></div><div class="metric-grid">${metric('Evidence objects','18.6 M','1.4 TB online this month','database',true)}${metric('Hash-chain status','Valid','0 integrity exceptions','shield')}${metric('Retention jobs','12','All completed on schedule','clock')}${metric('Pending approvals','04','2 relay · 2 export requests','userCheck')}</div><div class="panel" style="margin-top:12px"><div class="panel-head"><div><h3>Recent evidence events</h3><p>WORM store · role-gated playback · official timestamps</p></div><span class="status-tag live">Chain valid</span></div><div class="audit-wrap"><table class="audit-table"><thead><tr><th>Time</th><th>Event</th><th>Object</th><th>Actor</th><th>SHA-256</th><th>State</th></tr></thead><tbody>${rows.map(r=>`<tr><td><code>${r[0]}</code></td><td><b>${r[1]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td class="hash"><code>${r[4]}</code></td><td><span class="status-tag live">${r[5]}</span></td></tr>`).join('')}</tbody></table></div></div></section>`;
+  return `<section class="view"><div class="view-head"><div><p class="eyebrow">CHAIN OF CUSTODY</p><h2>Evidence & audit</h2><p>Every message, file, translation, radio action and generated brief retains source linkage and an immutable integrity record.</p></div><div class="view-actions"><button class="button secondary" data-action="verify-chain">${icon('shield')} Verify hash chain</button><button class="button primary" data-action="export-audit">${icon('file')} Export manifest</button></div></div><div class="metric-grid">${metric('Evidence objects','18.6 M','1.4 TB online this month','database',true)}${metric('Hash-chain status','Valid','0 integrity exceptions','shield')}${metric('Retention jobs','12','All completed on schedule','clock')}${metric('Pending approvals','04','2 relay · 2 export requests','userCheck')}</div><div class="panel" style="margin-top:12px"><div class="panel-head"><div><h3>Recent evidence events</h3><p>WORM store · role-gated playback · official timestamps</p></div><span class="status-tag live">Chain valid</span></div><div class="audit-wrap"><table class="audit-table"><thead><tr><th>Time</th><th>Event</th><th>Object</th><th>Actor</th><th>SHA-256</th><th>State</th></tr></thead><tbody>${rows.map(r=>`<tr><td><code>${r[0]}</code></td><td><b>${r[1]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td class="hash"><code>${r[4]}</code></td><td><span class="status-tag live">${r[5]}</span></td></tr>`).join('')}</tbody></table></div></div></section>`;
 }
 
 function render() {
+  if(state.organizationReactRoot){state.organizationReactRoot.unmount();state.organizationReactRoot=null;state.organizationRender=null;state.organizationFitView=null;}
   if(state.gisMap){state.gisMap.remove();state.gisMap=null;state.gisTileLayer=null;state.gisLayers={};}
   document.body.classList.remove('gis-expanded');
   const [eye, title] = titles[state.view] || titles.overview;
   eyebrow.textContent = eye; pageTitle.textContent = title;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === state.view));
-  const views = { overview:renderOverview, directory:renderDirectory, incidents:renderIncidents, comms:renderComms, translate:renderTranslate, integrations:renderIntegrations, audit:renderAudit };
+  const views = { overview:renderOverview, directory:renderDirectory, organization:renderOrganization, incidents:renderIncidents, comms:renderComms, translate:renderTranslate, integrations:renderIntegrations, audit:renderAudit };
   viewRoot.innerHTML = (views[state.view] || renderOverview)();
   bindViewEvents();
   if(state.view==='overview')requestAnimationFrame(initChennaiMap);
+  if(state.view==='organization')requestAnimationFrame(initOrganizationChart);
   window.scrollTo({top:0, behavior:'smooth'});
 }
 
@@ -397,7 +510,9 @@ function bindViewEvents() {
   viewRoot.querySelectorAll('[data-command-tab]').forEach(b => b.onclick = () => { state.commandTab = b.dataset.commandTab; render(); });
   viewRoot.querySelectorAll('[data-action]').forEach(b => b.onclick = () => handleAction(b.dataset.action, b));
   const ds = document.querySelector('#directorySearch'); if (ds) ds.oninput = e => { state.query = e.target.value; clearTimeout(ds._t); ds._t=setTimeout(render,160); };
-  const messageInput = document.querySelector('#messageInput'); if (messageInput) messageInput.onkeydown = e => { if (e.key==='Enter') sendMessage(); };
+  const organizationSearch=document.querySelector('#organizationSearch');if(organizationSearch)organizationSearch.oninput=()=>updateOrganizationSearch();
+  const organizationAgency=document.querySelector('#organizationAgency');if(organizationAgency)organizationAgency.onchange=()=>updateOrganizationSearch();
+  const messageInput = document.querySelector('#messageInput'); if (messageInput) {messageInput.oninput=()=>updateMentionPicker(messageInput);messageInput.onkeydown=e=>{if(e.key==='Escape'){closeMentionPicker();return;}if(e.key==='Enter')sendMessage();};}
   viewRoot.querySelectorAll('[data-gis-layer]').forEach(button=>button.onclick=()=>toggleGisLayer(button));
   viewRoot.querySelectorAll('[data-gis-base]').forEach(button=>button.onclick=()=>setGisBase(button.dataset.gisBase));
   bindPtt();
@@ -408,6 +523,8 @@ function handleAction(action, button) {
   const actions = {
     'new-incident': () => document.querySelector('#incidentDialog').showModal(),
     'upload': () => document.querySelector('#fileInput').click(),
+    'mention-trigger': triggerMentionPicker,
+    'fit-organization': () => state.organizationFitView?.(),
     'send-message': sendMessage,
     'open-channel': () => { state.selectedChannel='fire'; navigate('comms'); },
     'join-ptt': () => { state.selectedChannel='fire'; navigate('comms'); toast('Joined incident PTT · hold the talk button to transmit'); },
@@ -433,9 +550,10 @@ function handleAction(action, button) {
 function openPerson(id) {
   const p = people.find(x=>x.id===id); if (!p) return;
   const drawer = document.querySelector('#detailDrawer');
-  drawer.innerHTML = `<div class="drawer-head"><div><div class="drawer-avatar">${p.initials}</div><div class="drawer-copy"><span class="presence ${p.presence}">${p.presence==='online'?'Available now':p.presence==='radio'?'Radio only':'Unavailable'}</span><h2>${p.name}</h2><p>${p.role} · ${p.agency}</p></div></div><button class="icon-button" data-close-drawer>${icon('x')}</button></div><div class="drawer-actions"><button class="button primary" data-contact="PTT">${icon('radio')} PTT</button><button class="button secondary" data-contact="Call">${icon('phone')} Call</button><button class="button secondary" data-contact="Message">${icon('message')} Message</button></div><div class="drawer-info"><div><span>Current unit</span><b>${p.unit}</b></div><div><span>Jurisdiction</span><b>${p.zone}</b></div><div><span>Preferred reach</span><b>${p.method}</b></div><div><span>Languages</span><b>${p.language}</b></div><div><span>Official contact</span><b>${p.phone}</b></div><div><span>Duty window</span><b>08:00–20:00 IST</b></div></div><div class="escalation"><h3>Responsibility chain</h3><p>If this officer remains unreachable for 3 minutes on a critical incident, UECP escalates to the zonal ACP and records every attempt.</p></div>`;
+  drawer.innerHTML = `<div class="drawer-head"><div><div class="drawer-avatar">${p.initials}</div><div class="drawer-copy"><span class="presence ${p.presence}">${p.presence==='online'?'Available now':p.presence==='radio'?'Radio only':'Unavailable'}</span><h2>${p.name}</h2><p>${p.role} · ${p.agency}</p></div></div><button class="icon-button" data-close-drawer>${icon('x')}</button></div><div class="drawer-actions"><button class="button primary" data-contact="PTT">${icon('radio')} PTT</button><button class="button secondary" data-contact="Call">${icon('phone')} Call</button><button class="button secondary" data-contact="Message">${icon('message')} Message</button></div><div class="drawer-info"><div><span>Current unit</span><b>${p.unit}</b></div><div><span>Jurisdiction</span><b>${p.zone}</b></div><div><span>Preferred reach</span><b>${p.method}</b></div><div><span>Languages</span><b>${p.language}</b></div><div><span>Official contact</span><b>${p.phone}</b></div><div><span>Duty window</span><b>08:00–20:00 IST</b></div></div><button class="organization-drawer-link" data-open-organization="${p.id}">${icon('network')}<span><b>View in organization search</b><small>Trace duty responsibility and escalation path</small></span>${icon('chevron')}</button><div class="escalation"><h3>Escalation rule</h3><p>If this officer remains unreachable for 3 minutes on a critical incident, UECP escalates to the next duty role and records every attempt.</p></div>`;
   drawer.querySelector('[data-close-drawer]').onclick = closeDrawer;
   drawer.querySelectorAll('[data-contact]').forEach(b=>b.onclick=()=>toast(`${b.dataset.contact} request sent to ${p.name}`));
+  drawer.querySelector('[data-open-organization]').onclick=()=>{state.organizationSelectedPerson=p.id;state.organizationQuery=p.name;closeDrawer();navigate('organization');};
   drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false'); document.querySelector('#drawerBackdrop').classList.add('open');
 }
 
@@ -443,9 +561,36 @@ function closeDrawer() { document.querySelector('#detailDrawer').classList.remov
 
 function sendMessage() {
   const input = document.querySelector('#messageInput'); if (!input || !input.value.trim()) return;
-  conversations[state.selectedChannel].push({from:'You · State Control',time:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),text:escapeHtml(input.value.trim()),mine:true});
-  input.value=''; render(); setTimeout(()=>document.querySelector('#messageStream')?.scrollTo({top:99999,behavior:'smooth'}),20);
+  conversations[state.selectedChannel].push({from:'You · State Control',time:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),text:escapeHtml(input.value.trim()),mentions:[...state.composerMentionIds],mine:true});
+  input.value='';state.composerMentionIds=[];render(); setTimeout(()=>document.querySelector('#messageStream')?.scrollTo({top:99999,behavior:'smooth'}),20);
 }
+
+function triggerMentionPicker() {
+  const input=document.querySelector('#messageInput');if(!input)return;
+  if(input.value&&!/\s$/.test(input.value))input.value+=' ';
+  input.value+='@';input.focus();updateMentionPicker(input);
+}
+
+function updateMentionPicker(input) {
+  const picker=document.querySelector('#mentionPicker');if(!picker)return;
+  const match=input.value.match(/(?:^|\s)@([^@\s]*)$/);if(!match){picker.hidden=true;return;}
+  const query=match[1].toLowerCase();
+  const matches=people.filter(person=>`${person.name} ${person.role} ${person.agency} ${person.unit} ${person.zone}`.toLowerCase().includes(query)).slice(0,7);
+  picker.innerHTML=`<header><span>DIRECTORY MATCHES</span><small>${matches.length} available</small></header>${matches.length?matches.map(person=>`<button data-mention-id="${person.id}"><span class="avatar">${person.initials}</span><span><b>${person.name}</b><small>${person.role} · ${person.unit}</small></span><i class="presence ${person.presence}">${person.presence==='online'?'Available':person.presence==='radio'?'Radio':'Escalate'}</i></button>`).join(''):'<p>No matching person or unit</p>'}`;
+  picker.hidden=false;
+  picker.querySelectorAll('[data-mention-id]').forEach(button=>button.onclick=()=>insertMention(input,Number(button.dataset.mentionId)));
+}
+
+function insertMention(input,id) {
+  const person=people.find(item=>item.id===id);if(!person)return;
+  const match=input.value.match(/(?:^|\s)@([^@\s]*)$/);if(!match)return;
+  const prefixSpace=match[0].startsWith(' ')?1:0;const start=match.index+prefixSpace;
+  input.value=input.value.slice(0,start)+`@${person.name} `;
+  if(!state.composerMentionIds.includes(id))state.composerMentionIds.push(id);
+  closeMentionPicker();input.focus();toast(`${person.name} added from the duty directory`);
+}
+
+function closeMentionPicker(){const picker=document.querySelector('#mentionPicker');if(picker)picker.hidden=true;}
 
 function bindPtt() {
   const ptt = document.querySelector('#pttButton'); if (!ptt) return;
@@ -492,11 +637,11 @@ async function transcribeAudioBlob(blob, sourceLabel='Uploaded voice note') {
     const original=escapeHtml(data.transcript||'[No speech detected]');
     const english=escapeHtml(data.englishTranslation||'');
     conversations.fire.push({
-      from:`You · ${sourceLabel} · Gemini 3.1 Flash-Lite`,
+      from:`You · ${sourceLabel} · Automated transcription`,
       time:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),
       text:original,
       translation:english&&english!==original?english:'',
-      translationModel:'Gemini 3.1 Flash-Lite',
+      translationModel:'Audio transcription',
       mine:true,
       ai:true
     });
@@ -522,7 +667,7 @@ function saveWorkerSettings() {
 
 async function testWorker() {
   const url = document.querySelector('#workerUrl')?.value.trim().replace(/\/$/,''); if (!url) return toast('Enter the Worker URL first');
-  try { const r=await fetch(`${url}/health`); const data=await r.json(); if(!r.ok)throw new Error(data.error||'unavailable'); toast(`Worker connected · ${data.liveModel||'approved model ready'}`); }
+  try { const r=await fetch(`${url}/health`); const data=await r.json(); if(!r.ok)throw new Error(data.error||'unavailable'); toast('Language gateway connected · live audio ready'); }
   catch(e){ toast(`Worker connection failed · ${e.message}`); }
 }
 
@@ -533,9 +678,9 @@ async function refreshBrief(button) {
     if (!url) throw new Error('demo');
     const r=await fetch(`${url}/text/brief`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({incidentId:'INC-0431',events:['Bus, lorry and car collided near Guindy flyover','Car fire suppression in progress','50 metre hot zone active','Southbound lanes closed with emergency corridor','Two red-priority patients and three walking wounded','Lorry cargo declaration not yet verified','NHAI spill control ETA six minutes']})});
     const data=await r.json(); if(!r.ok)throw new Error(data.error||'brief failed');
-    const panel=document.querySelector('#briefPanel'); if(panel)panel.innerHTML=`<div class="timeline-item"><span class="timeline-time">NOW</span><div class="timeline-copy"><strong>AI communications brief refreshed.</strong><p>${escapeHtml(data.brief)}</p></div></div>`;
-    toast('Brief regenerated with Gemini 3.1 Flash-Lite');
-  } catch { setTimeout(()=>toast('Demo brief refreshed · connect Worker for live Gemini output'),300); }
+    const panel=document.querySelector('#briefPanel'); if(panel)panel.innerHTML=`<div class="timeline-item"><span class="timeline-time">NOW</span><div class="timeline-copy"><strong>Communications brief refreshed.</strong><p>${escapeHtml(data.brief)}</p></div></div>`;
+    toast('Communications brief regenerated');
+  } catch { setTimeout(()=>toast('Demo brief refreshed · connect the secure gateway for generated output'),300); }
   finally { if(button){button.disabled=false;button.innerHTML=original;} }
 }
 
@@ -555,7 +700,7 @@ async function startTranslation() {
     const wsUrl=base.replace(/^http/,'ws')+'/live'; const socket=new WebSocket(wsUrl); state.socket=socket;
     updateSession('Connecting securely…','Opening the Worker relay');
     socket.onopen=async()=>{
-      socket.send(JSON.stringify({setup:{model:'models/gemini-3.5-live-translate-preview',generationConfig:{responseModalities:['AUDIO'],inputAudioTranscription:{},outputAudioTranscription:{},translationConfig:{targetLanguageCode:target,echoTargetLanguage:document.querySelector('#echoLanguage').checked}}}}));
+      socket.send(JSON.stringify({setup:{generationConfig:{responseModalities:['AUDIO'],inputAudioTranscription:{},outputAudioTranscription:{},translationConfig:{targetLanguageCode:target,echoTargetLanguage:document.querySelector('#echoLanguage').checked}}}}));
       await beginMicrophone(socket); state.translating=true; updateMicUi(); updateSession('Live translation active','Listening · tap the yellow microphone to stop');
     };
     socket.onmessage=e=>handleLiveMessage(e.data);
@@ -608,22 +753,22 @@ async function playSyntheticSample(button) {
   if(localSource){
     const localAudio=new Audio(localSource);
     let fallbackStarted=false;
-    const fallback=()=>{if(fallbackStarted)return;fallbackStarted=true;playGeminiSample(button);};
+    const fallback=()=>{if(fallbackStarted)return;fallbackStarted=true;playGeneratedSample(button);};
     localAudio.onended=()=>finishSample(button,'Approved operational voice sample complete');
     localAudio.onerror=fallback;
     try { await localAudio.play(); return; } catch { fallback(); return; }
   }
-  await playGeminiSample(button);
+  await playGeneratedSample(button);
 }
 
-async function playGeminiSample(button) {
+async function playGeneratedSample(button) {
   try {
     const workerUrl=(localStorage.getItem('uecpWorkerUrl') || DEFAULT_WORKER_URL).replace(/\/$/,'');
     const response=await fetch(`${workerUrl}/tts/sample`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sampleId:button.dataset.audioSample})});
-    if(!response.ok)throw new Error('Gemini audio unavailable');
+    if(!response.ok)throw new Error('Generated audio unavailable');
     const audioUrl=URL.createObjectURL(await response.blob());
     const audio=new Audio(audioUrl);
-    audio.onended=()=>{URL.revokeObjectURL(audioUrl);finishSample(button,'Gemini 3.1 Flash TTS sample complete');};
+    audio.onended=()=>{URL.revokeObjectURL(audioUrl);finishSample(button,'Generated operational voice sample complete');};
     audio.onerror=()=>{URL.revokeObjectURL(audioUrl);playBrowserVoice(button);};
     await audio.play();
   } catch {
@@ -694,14 +839,42 @@ document.querySelector('#menuButton').onclick=()=>document.querySelector('#sideb
 document.querySelector('#drawerBackdrop').onclick=closeDrawer;
 document.querySelector('#fileInput').onchange=async e=>{
   const files=[...e.target.files]; const audioFiles=files.filter(file=>file.type.startsWith('audio/'));
-  if(audioFiles.length){toast(`${audioFiles.length} audio file${audioFiles.length>1?'s':''} attached · Flash-Lite transcription started`);for(const file of audioFiles.slice(0,3))await transcribeAudioBlob(file,'Uploaded evidence audio');}
+  if(audioFiles.length){toast(`${audioFiles.length} audio file${audioFiles.length>1?'s':''} attached · secure transcription started`);for(const file of audioFiles.slice(0,3))await transcribeAudioBlob(file,'Uploaded evidence audio');}
   const otherCount=files.length-audioFiles.length;if(otherCount)toast(`${otherCount} file${otherCount>1?'s':''} attached to the evidence record`);
   e.target.value='';
 };
 document.querySelector('#incidentDialog').addEventListener('close',e=>{if(e.target.returnValue!=='default')return;const form=new FormData(document.querySelector('#incidentForm'));const title=form.get('title'),locationName=form.get('location');if(!title||!locationName)return;const item={id:`INC-${String(432+incidents.length).padStart(4,'0')}`,title,location:locationName,severity:form.get('severity'),source:form.get('source'),age:'Just now',agencies:['POL','F&R','108'],responders:0,status:'Live'};incidents.unshift(item);state.selectedIncident=item.id;toast(`${item.id} created · responsible agencies notified`);navigate('incidents');document.querySelector('#incidentForm').reset();});
-document.querySelector('#globalSearch').addEventListener('input',e=>{const q=e.target.value.toLowerCase().trim();if(!q)return;const person=people.find(p=>`${p.name} ${p.unit} ${p.role}`.toLowerCase().includes(q));const incident=incidents.find(i=>`${i.id} ${i.title} ${i.location}`.toLowerCase().includes(q));if(person){state.query=e.target.value;navigate('directory');}else if(incident){state.selectedIncident=incident.id;navigate('incidents');}});
+document.querySelector('#globalSearch').addEventListener('input',e=>{const q=e.target.value.toLowerCase().trim();if(!q)return;const person=people.find(p=>`${p.name} ${p.unit} ${p.role} ${p.agency}`.toLowerCase().includes(q));const incident=incidents.find(i=>`${i.id} ${i.title} ${i.location}`.toLowerCase().includes(q));if(person){state.organizationQuery=e.target.value;state.organizationSelectedPerson=person.id;navigate('organization');}else if(incident){state.selectedIncident=incident.id;navigate('incidents');}});
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();document.querySelector('#globalSearch').focus();}if(e.key==='Escape')closeDrawer();});
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(titles[h]&&h!==state.view){state.view=h;render();}});
 setInterval(()=>{const c=document.querySelector('#clock');if(c)c.textContent=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Kolkata'})+' IST';},1000);
 
-hydrateIcons(); render(); loadIncidentDatabase();
+function showApplication() {
+  document.querySelector('#loginScreen').hidden=true;
+  const shell=document.querySelector('#appShell');shell.classList.remove('auth-locked');shell.setAttribute('aria-hidden','false');
+  render();
+  if(!state.databaseLoaded){state.databaseLoaded=true;loadIncidentDatabase();}
+}
+
+function showLogin() {
+  document.querySelector('#loginScreen').hidden=false;
+  const shell=document.querySelector('#appShell');shell.classList.add('auth-locked');shell.setAttribute('aria-hidden','true');
+  setTimeout(()=>document.querySelector('#loginUser')?.focus(),50);
+}
+
+document.querySelector('#loginForm').addEventListener('submit',event=>{
+  event.preventDefault();
+  const user=document.querySelector('#loginUser').value.trim();
+  const password=document.querySelector('#loginPassword').value;
+  const error=document.querySelector('#loginError');
+  if(user==='admin'&&password==='admin123'){
+    sessionStorage.setItem('uecpDemoAuthenticated','true');error.textContent='';showApplication();toast('Signed in · Chennai State Control demo');
+  }else{
+    error.textContent='Incorrect user ID or password.';
+    document.querySelector('#loginPassword').select();
+  }
+});
+document.querySelector('#accountButton').onclick=()=>{sessionStorage.removeItem('uecpDemoAuthenticated');location.hash='overview';location.reload();};
+
+hydrateIcons();
+if(sessionStorage.getItem('uecpDemoAuthenticated')==='true')showApplication();else showLogin();

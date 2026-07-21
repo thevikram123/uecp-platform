@@ -19,6 +19,14 @@ const TTS_SAMPLES = Object.freeze({
   'district-radio-ta': {
     voice: 'Puck',
     input: 'Speak in Tamil as a concise male police radio officer with controlled urgency. Say exactly: ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.'
+  },
+  'fire-command-ta': {
+    voice: 'Puck',
+    input: 'Speak in Tamil as a calm male fire commander over operational radio. Use a concise, controlled cadence. Say exactly: தீ கட்டுப்பாட்டில் உள்ளது. காரில் இருந்த அனைவரும் பாதுகாப்பாக வெளியேற்றப்பட்டுள்ளனர். நூற்றி எட்டு குழு வடக்குப் பக்கத்திலிருந்து அணுகலாம்.'
+  },
+  'dispatch-clearance-en': {
+    voice: 'Kore',
+    input: 'Speak as a composed female Indian emergency dispatcher over a clear radio channel. Use crisp operational cadence. Say exactly: ERSS dispatch to all responding units. Fire reports knockdown achieved. Maintain the southbound closure until spill control clears the carriageway.'
   }
 });
 const ALLOWED_LANGUAGES = new Set([
