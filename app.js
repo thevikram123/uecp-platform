@@ -405,7 +405,8 @@ async function initOrganizationChart() {
 }
 
 function updateOrganizationSearch() {
-  const query=(document.querySelector('#organizationSearch')?.value||state.organizationQuery).trim().toLowerCase();
+  const searchInput=document.querySelector('#organizationSearch');
+  const query=(searchInput?searchInput.value:state.organizationQuery).trim().toLowerCase();
   const agency=document.querySelector('#organizationAgency')?.value||state.organizationAgency;
   state.organizationQuery=query;state.organizationAgency=agency;
   const matches=people.filter(person=>(agency==='All agencies'||person.agency===agency)&&`${person.name} ${person.role} ${person.unit} ${person.agency} ${person.zone}`.toLowerCase().includes(query));
