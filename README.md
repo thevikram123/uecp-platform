@@ -33,13 +33,13 @@ The Worker binds the existing account-level `GEMINI_API_KEY` from Cloudflare Sec
 
 The Worker exposes:
 
-- `GET /health` — approved models and configuration state.
+- `GET /health` — model and configuration state.
 - `GET /data/incidents` — fictional Chennai live-incident list from Cloudflare D1.
 - `GET /data/incidents/:id` — full incident context including messages, timeline, tasks, resources, evidence and audio metadata.
-- `POST /text/brief` — incident brief generation using `gemini-3.1-flash-lite`.
-- `POST /text/transcribe` — short Tamil/English audio transcription and English translation using `gemini-3.1-flash-lite`.
-- `POST /tts/sample` — approved Tamil and English operational samples using `gemini-3.1-flash-tts-preview`.
-- `WS /live` — key-protected Gemini Live relay enforcing `gemini-3.5-live-translate-preview` and approved translation languages.
+- `POST /text/brief` — incident brief generation using `gemini-2.5-pro`.
+- `POST /text/transcribe` — short Tamil/English audio transcription and English translation using `gemini-2.5-pro`.
+- `POST /tts/sample` — Tamil and English operational speech using `gemini-2.5-pro-preview-tts`.
+- `WS /live` — key-protected Gemini Live relay enforcing `gemini-3.5-live-translate-preview` and configured translation languages.
 
 Cloudflare Rate Limiting bindings protect text, TTS and live-session routes. A production rollout still requires UECP user authentication, formal quota policy and state data-localisation controls.
 

@@ -1,8 +1,8 @@
 const GEMINI_HTTP = 'https://generativelanguage.googleapis.com';
 const GEMINI_LIVE = 'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const DEFAULT_LIVE_MODEL = 'gemini-3.5-live-translate-preview';
-const DEFAULT_TEXT_MODEL = 'gemini-3.1-flash-lite';
-const DEFAULT_TTS_MODEL = 'gemini-3.1-flash-tts-preview';
+const DEFAULT_TEXT_MODEL = 'gemini-2.5-pro';
+const DEFAULT_TTS_MODEL = 'gemini-2.5-pro-preview-tts';
 const TTS_SAMPLES = Object.freeze({
   'first-scene-ta': {
     voice: 'Kore',
