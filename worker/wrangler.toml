@@ -1,0 +1,14 @@
+name = "uecp-gemini-proxy"
+main = "src/worker.js"
+compatibility_date = "2026-07-01"
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:4173,http://127.0.0.1:4173"
+LIVE_MODEL = "gemini-3.5-live-translate-preview"
+TEXT_MODEL = "gemini-3.1-flash-lite"
+
+# GEMINI_API_KEY must be configured as a secret:
+# npx wrangler secret put GEMINI_API_KEY
+#
+# After GitHub Pages is live, update ALLOWED_ORIGINS to its exact origin:
+# https://YOUR_GITHUB_USERNAME.github.io
