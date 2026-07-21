@@ -253,17 +253,23 @@ body.gis-expanded { overflow: hidden; }
 .person-actions span { flex: 1; height: 29px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); font-size: 8px; font-weight: 700; }
 .person-actions span:first-child { border-color: #111; background: var(--yellow); }
 
-.organization-layout { display: grid; grid-template-columns: 300px minmax(0,1fr); min-height: 690px; border: 1px solid var(--line); background: #fff; }
-.organization-search-panel { padding: 18px; border-right: 1px solid var(--line); background: #fff; }
-.organization-search-panel .form-label { margin-top: 16px; }
-.organization-search-panel .form-label:first-child { margin-top: 0; }
-.organization-search-box { height: 42px; padding: 0 11px; display: flex; align-items: center; gap: 8px; border: 1px solid #111; background: #fff; }
-.organization-search-box input { min-width: 0; flex: 1; border: 0; outline: 0; font-size: 11px; }
-.organization-results { margin-top: 18px; border-top: 1px solid var(--line); }
-.organization-results header { padding: 13px 2px 9px; display: flex; align-items: baseline; gap: 6px; }
+.organization-view { height: calc(100vh - 74px); padding: 0; background: #fff; }
+.organization-stage { position: relative; width: 100%; height: 100%; min-height: 700px; overflow: hidden; border-bottom: 1px solid var(--line); background: #fff; }
+.topology-heading { position: absolute; z-index: 8; top: 42px; left: 42px; pointer-events: none; }
+.topology-heading p { margin: 0 0 6px; font: 800 8px Roboto Mono, monospace; letter-spacing: .16em; }
+.topology-heading h2 { margin: 0; font-size: clamp(25px,2.2vw,38px); font-weight: 800; letter-spacing: -.055em; }
+.topology-heading span { display: block; margin-top: 7px; font: 800 10px Roboto Mono, monospace; letter-spacing: .14em; }
+.organization-tools { position: absolute; z-index: 10; top: 30px; right: 30px; width: 330px; padding: 11px; display: grid; grid-template-columns: 1fr 104px; gap: 8px; border: 1px solid rgba(17,17,17,.18); background: rgba(255,255,255,.96); box-shadow: 0 8px 24px rgba(0,0,0,.08); backdrop-filter: blur(8px); }
+.organization-search-box { grid-column: 1 / -1; height: 40px; padding: 0 11px; display: flex; align-items: center; gap: 8px; border: 1px solid #111; background: #fff; }
+.organization-search-box input { min-width: 0; flex: 1; border: 0; outline: 0; font-size: 10px; }
+.organization-tools .select { height: 36px; }
+.organization-tools .button { min-height: 36px; }
+.organization-results { position: absolute; top: calc(100% + 5px); right: 0; width: 330px; max-height: 390px; overflow: auto; border: 1px solid #111; background: #fff; box-shadow: 0 12px 32px rgba(0,0,0,.15); }
+.organization-results[hidden] { display: none; }
+.organization-results header { padding: 11px; display: flex; align-items: baseline; gap: 6px; border-bottom: 1px solid var(--line); background: var(--yellow); }
 .organization-results header b { font: 800 18px Roboto Mono, monospace; }
 .organization-results header span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
-.organization-results > button { width: 100%; padding: 10px 7px; display: flex; align-items: center; gap: 9px; border: 0; border-top: 1px solid var(--soft-line); background: #fff; cursor: pointer; text-align: left; }
+.organization-results > button { width: 100%; padding: 10px 11px; display: flex; align-items: center; gap: 9px; border: 0; border-bottom: 1px solid var(--soft-line); background: #fff; cursor: pointer; text-align: left; }
 .organization-results > button:hover { background: var(--yellow-soft); }
 .organization-results .avatar { width: 31px; height: 31px; display: grid; place-items: center; flex: none; border-radius: 50%; color: var(--yellow); background: #111; font-size: 8px; font-weight: 800; }
 .organization-results > button > span:nth-child(2) { min-width: 0; flex: 1; }
@@ -272,42 +278,38 @@ body.gis-expanded { overflow: hidden; }
 .organization-results small { margin-top: 3px; color: var(--muted); font-size: 7px; }
 .organization-results .presence { width: 8px; height: 8px; font-size: 0; }
 .organization-results > p { padding: 24px 6px; color: var(--muted); font-size: 9px; }
-.organization-key { margin-top: 18px; padding-top: 15px; display: grid; gap: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8px; }
+.organization-key { position: absolute; z-index: 7; left: 42px; bottom: 25px; padding: 10px; display: flex; gap: 14px; border: 1px solid rgba(17,17,17,.2); background: rgba(255,255,255,.94); color: var(--muted); font-size: 8px; }
 .organization-key span { display: flex; align-items: center; gap: 7px; }
 .key-node { width: 16px; height: 10px; border: 1px solid #111; background: #fff; }
 .key-node.command { background: var(--yellow); }
-.key-node.agency { background: #111; }
-.organization-canvas-panel { position: relative; min-width: 0; display: flex; flex-direction: column; background: #fff; }
-.organization-canvas-panel > header { min-height: 62px; padding: 0 15px 0 19px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
-.organization-canvas-panel h3 { margin: 0; font-size: 13px; }
-.organization-canvas-panel header p { margin: 4px 0 0; color: var(--muted); font-size: 8px; }
-.organization-chart { min-height: 620px; flex: 1; background: #fff; }
+.key-node.agency { border-width: 2px; }
+.organization-chart { position: absolute; inset: 0; background: #fff; }
 .organization-loading, .organization-fallback { height: 100%; display: grid; place-content: center; gap: 6px; color: var(--muted); text-align: center; font-size: 9px; }
 .organization-fallback strong { color: #111; font-size: 12px; }
-.organization-flow-node { position: relative; width: 190px; min-height: 68px; padding: 13px 14px 12px; display: flex; flex-direction: column; justify-content: center; border: 1px solid #bcbcbc; border-radius: 5px; color: #111; background: #fff; box-shadow: 0 5px 14px rgba(0,0,0,.09); text-align: left; }
-.organization-flow-node.command { width: 218px; min-height: 74px; border: 2px solid #111; background: var(--yellow); }
-.organization-flow-node.agency { border-color: #111; color: #fff; background: #111; cursor: pointer; }
+.organization-flow-node { position: relative; width: 220px; min-height: 112px; padding: 14px; border: 1px solid #c8c8c8; border-radius: 7px; color: #111; background: #fff; box-shadow: 0 7px 18px rgba(0,0,0,.11); text-align: left; }
+.organization-flow-node.command { width: 240px; border: 2px solid #111; }
+.organization-flow-node.cluster { width: 230px; }
+.organization-flow-node.agency { border-color: #999; cursor: pointer; }
 .organization-flow-node.person { cursor: pointer; }
-.organization-flow-node.person.online { border-bottom: 5px solid var(--success); }
-.organization-flow-node.person.radio { border-bottom: 5px solid #ec8d00; }
-.organization-flow-node.person.offline { border-bottom: 5px solid #aaa; }
-.organization-flow-node.highlighted { border: 3px solid #111; color: #111; background: var(--yellow); box-shadow: 0 0 0 4px rgba(255,230,0,.2),0 7px 18px rgba(0,0,0,.13); }
-.organization-flow-node .organization-node-type { margin-bottom: 5px; color: #777; font: 800 7px Roboto Mono, monospace; letter-spacing: .12em; }
-.organization-flow-node.agency .organization-node-type { color: var(--yellow); }
-.organization-flow-node strong { font-size: 10px; line-height: 1.25; }
-.organization-flow-node small { margin-top: 4px; color: #777; font-size: 7px; line-height: 1.35; }
-.organization-flow-node.agency small { color: #ccc; }
+.organization-flow-node.highlighted { border: 3px solid #111; background: var(--yellow); box-shadow: 0 0 0 4px rgba(255,230,0,.2),0 8px 20px rgba(0,0,0,.15); }
+.organization-node-main { display: flex; align-items: center; gap: 12px; }
+.organization-node-main > div { min-width: 0; flex: 1; }
+.organization-node-icon { width: 44px; height: 44px; display: grid; place-items: center; flex: none; border: 1px solid #ddd; border-radius: 4px; background: #f5f5f5; font: 900 10px Roboto Mono, monospace; }
+.organization-flow-node.command .organization-node-icon, .organization-flow-node.cluster .organization-node-icon { border-color: #111; background: var(--yellow); }
+.organization-flow-node .organization-node-type { display: block; margin-bottom: 5px; color: #555; font: 800 8px Roboto Mono, monospace; letter-spacing: .13em; }
+.organization-flow-node strong { display: block; font: 800 12px Roboto Mono, monospace; line-height: 1.25; }
+.organization-flow-node small { display: block; margin-top: 4px; color: #777; font-size: 7px; line-height: 1.35; }
 .organization-flow-node.highlighted small, .organization-flow-node.highlighted .organization-node-type { color: #333; }
-.organization-collapse { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid var(--yellow); color: #111; background: var(--yellow); font: 900 12px Roboto Mono, monospace; }
+.organization-node-status { margin-top: 13px; padding-top: 9px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #ddd; font: 800 8px Roboto Mono, monospace; text-transform: uppercase; }
+.organization-node-status b { padding: 3px 5px; color: #111; background: var(--yellow); font-size: 8px; }
+.organization-flow-node.person.offline .organization-node-status b { color: #fff; background: var(--danger); }
+.organization-collapse { position: absolute; z-index: 3; top: 9px; right: 9px; width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #111; color: #111; background: var(--yellow); font: 900 12px Roboto Mono, monospace; }
 .organization-dim { opacity: .17; }
-.organization-chart .react-flow__handle { width: 7px; height: 7px; border: 1px solid #111; background: var(--yellow); }
+.organization-chart .react-flow__handle { width: 8px; height: 8px; border: 1px solid #111; background: #111; }
 .organization-chart .react-flow__controls { border: 1px solid #111; box-shadow: none; }
 .organization-chart .react-flow__controls button { color: #111; background: #fff; border-color: #ddd; }
 .organization-chart .react-flow__controls button:hover { background: var(--yellow); }
 .organization-chart .react-flow__minimap { border: 7px solid #888; background: #fff; box-shadow: none; }
-.diagram-library-note { position: absolute; z-index: 4; right: 12px; bottom: 10px; display: grid; justify-items: end; gap: 3px; pointer-events: none; }
-.diagram-library-note span { padding: 5px 7px; display: flex; align-items: center; gap: 5px; border: 1px solid #111; color: #111; background: var(--yellow); font-size: 8px; font-weight: 800; }
-.diagram-library-note small { color: var(--muted); font-size: 7px; }
 
 .incident-workspace { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(300px,.65fr); gap: 12px; }
 .incident-detail { border: 1px solid var(--line); }
@@ -511,7 +513,6 @@ body.gis-expanded { overflow: hidden; }
   .classification { display: none; }
   .dashboard-grid, .translate-layout, .incident-workspace { grid-template-columns: 1fr; }
   .directory-layout { grid-template-columns: 1fr; }
-  .organization-layout { grid-template-columns: 260px minmax(0,1fr); }
   .filter-panel { display: grid; grid-template-columns: repeat(3,1fr); }
   .filter-section { border-right: 1px solid var(--line); border-bottom: 0; }
   .comms-layout { grid-template-columns: 235px 1fr; }
@@ -549,9 +550,13 @@ body.gis-expanded { overflow: hidden; }
   .filter-panel { display: block; }
   .filter-section { border-right: 0; border-bottom: 1px solid var(--line); }
   .person-grid, .integration-grid { grid-template-columns: 1fr; }
-  .organization-layout { display: block; }
-  .organization-search-panel { border-right: 0; border-bottom: 1px solid var(--line); }
-  .organization-chart { min-height: 560px; }
+  .organization-view { height: calc(100vh - 62px); }
+  .topology-heading { top: 21px; left: 16px; }
+  .topology-heading h2 { font-size: 24px; }
+  .topology-heading span { font-size: 8px; }
+  .organization-tools { top: 112px; left: 12px; right: 12px; width: auto; }
+  .organization-results { left: 0; right: 0; width: auto; }
+  .organization-key { display: none; }
   .comms-layout { display: block; min-height: 0; }
   .channel-list { border-right: 0; }
   .channel-item:not(.active) { display: none; }

@@ -314,10 +314,7 @@ function personCard(p) {
 
 function renderOrganization() {
   const agencies=['All agencies',...new Set(people.map(person=>person.agency))];
-  return `<section class="view organization-view"><div class="view-head"><div><p class="eyebrow">SEARCH · TRACE · CONTACT</p><h2>Organization search</h2><p>Search the live duty structure, trace command responsibility and open the exact officer or unit required for an incident.</p></div><div class="view-actions"><span class="classification">CHENNAI · ON-DUTY STRUCTURE</span></div></div>
-    <div class="organization-layout"><aside class="organization-search-panel"><label class="form-label" for="organizationSearch">Officer, role, unit or agency</label><div class="organization-search-box">${icon('search')}<input id="organizationSearch" value="${escapeHtml(state.organizationQuery)}" placeholder="Start typing a name…" autocomplete="off"></div><label class="form-label" for="organizationAgency">Agency</label><select class="select" id="organizationAgency">${agencies.map(agency=>`<option ${state.organizationAgency===agency?'selected':''}>${agency}</option>`).join('')}</select><div class="organization-results" id="organizationResults"></div><div class="organization-key"><span><i class="key-node command"></i>Command</span><span><i class="key-node agency"></i>Agency</span><span><i class="key-node person"></i>Officer / unit</span></div></aside>
-      <section class="organization-canvas-panel"><header><div><h3>Operational responsibility network</h3><p>Drag to pan · scroll to zoom · select any officer to open their duty profile</p></div><button class="button secondary" data-action="fit-organization">Fit structure</button></header><div id="organizationChart" class="organization-chart" aria-label="Interactive Chennai emergency organization hierarchy"></div><div class="diagram-library-note"><span>${icon('network',13)} Interactive diagram view</span><small>Duty structure · current demonstration roster</small></div></section></div>
-  </section>`;
+  return `<section class="organization-view"><div class="organization-stage"><div class="topology-heading"><p>RESPONSIBILITY NETWORK</p><h2>ORGANIZATION COMMAND</h2><span>REAL-TIME DUTY HIERARCHY · CHENNAI</span></div><div class="organization-tools"><div class="organization-search-box">${icon('search')}<input id="organizationSearch" aria-label="Officer, role, unit or agency" value="${escapeHtml(state.organizationQuery)}" placeholder="Search officer, unit or agency…" autocomplete="off"></div><select class="select" id="organizationAgency" aria-label="Agency filter">${agencies.map(agency=>`<option ${state.organizationAgency===agency?'selected':''}>${agency}</option>`).join('')}</select><button class="button primary" data-action="fit-organization">Fit view</button><div class="organization-results" id="organizationResults"></div></div><div id="organizationChart" class="organization-chart" aria-label="Interactive Chennai emergency organization hierarchy"></div><div class="organization-key"><span><i class="key-node command"></i>Command</span><span><i class="key-node agency"></i>Agency</span><span><i class="key-node person"></i>Duty contact</span></div></div></section>`;
 }
 
 function organizationGraphData() {
@@ -330,18 +327,28 @@ function organizationGraphData() {
     'Disaster Mgmt':['State Emergency Operations','Chennai District EOC'],
     'TANGEDCO':['State Load Dispatch','Chennai South Circle']
   };
-  const nodes=[{id:'state-control',type:'org',position:{x:840,y:24},data:{label:'Tamil Nadu State Control',sub:'Unified command',kind:'command'}}];
+  const nodes=[
+    {id:'state-control',type:'org',position:{x:730,y:20},data:{label:'Tamil Nadu State Control',sub:'Unified emergency command',kind:'command',badge:'TN'}},
+    {id:'response-operations',type:'org',position:{x:320,y:205},data:{label:'Response Operations',sub:'Police · Fire · Traffic · ERSS',kind:'cluster',badge:'RO'}},
+    {id:'support-operations',type:'org',position:{x:1130,y:205},data:{label:'Health & Support',sub:'Medical · EOC · Utilities',kind:'cluster',badge:'HS'}}
+  ];
   const edges=[];
-  Object.entries(agencyMeta).forEach(([agency,[label,sub]],agencyIndex)=>{
+  edges.push({id:'edge-state-response',source:'state-control',target:'response-operations',type:'smoothstep',animated:true});
+  edges.push({id:'edge-state-support',source:'state-control',target:'support-operations',type:'smoothstep',animated:true});
+  const responseAgencies=new Set(['Police','Fire & Rescue','Traffic','ERSS 112']);
+  const responseX={'Police':0,'Fire & Rescue':265,'Traffic':530,'ERSS 112':795};
+  const supportX={'EMRI 108':1060,'Disaster Mgmt':1325,'TANGEDCO':1590};
+  Object.entries(agencyMeta).forEach(([agency,[label,sub]])=>{
     const agencyId=`agency-${agency.replace(/\W+/g,'-').toLowerCase()}`;
-    const x=agencyIndex*280;
-    nodes.push({id:agencyId,type:'org',position:{x,y:190},data:{label,sub,kind:'agency',agency}});
-    edges.push({id:`edge-state-${agencyId}`,source:'state-control',target:agencyId,type:'step'});
+    const x=responseAgencies.has(agency)?responseX[agency]:supportX[agency];
+    const parent=responseAgencies.has(agency)?'response-operations':'support-operations';
+    nodes.push({id:agencyId,type:'org',position:{x,y:400},data:{label,sub,kind:'agency',agency,badge:agency==='Fire & Rescue'?'FR':agency==='Disaster Mgmt'?'EOC':agency.replace(/[^A-Z0-9]/g,'').slice(0,3)}});
+    edges.push({id:`edge-${parent}-${agencyId}`,source:parent,target:agencyId,type:'smoothstep'});
     const agencyPeople=people.filter(person=>person.agency===agency);
     agencyPeople.forEach((person,personIndex)=>{
       const personId=`person-${person.id}`;
-      nodes.push({id:personId,type:'org',position:{x:x+(personIndex-(agencyPeople.length-1)/2)*190,y:380},data:{label:person.name,sub:`${person.role} · ${person.unit}`,kind:'person',agency,personId:person.id,presence:person.presence}});
-      edges.push({id:`edge-${agencyId}-${personId}`,source:agencyId,target:personId,type:'step'});
+      nodes.push({id:personId,type:'org',position:{x:x+(personIndex-(agencyPeople.length-1)/2)*190,y:615},data:{label:person.name,sub:`${person.role} · ${person.unit}`,kind:'person',agency,personId:person.id,presence:person.presence,badge:person.initials}});
+      edges.push({id:`edge-${agencyId}-${personId}`,source:agencyId,target:personId,type:'smoothstep'});
     });
   });
   return {nodes,edges};
@@ -360,28 +367,33 @@ async function initOrganizationChart() {
     if(document.querySelector('#organizationChart')!==container)return;
     const React=ReactModule.default||ReactModule;
     const {ReactFlow,Controls,MiniMap,Background,BackgroundVariant,Handle,Position}=Flow;
-    const FlowNode=({data})=>React.createElement('div',{className:`organization-flow-node ${data.kind} ${data.presence||''} ${data.highlighted?'highlighted':''}`},
-      data.kind!=='command'&&React.createElement(Handle,{type:'target',position:Position.Top}),
-      React.createElement('span',{className:'organization-node-type'},data.kind==='command'?'STATE COMMAND':data.kind==='agency'?'AGENCY COMMAND':'DUTY CONTACT'),
-      data.kind==='agency'&&React.createElement('span',{className:'organization-collapse',title:data.collapsed?'Expand branch':'Collapse branch'},data.collapsed?'+':'−'),
-      React.createElement('strong',null,data.label),React.createElement('small',null,data.sub),
-      data.kind!=='person'&&React.createElement(Handle,{type:'source',position:Position.Bottom})
-    );
+    const FlowNode=({data})=>{
+      const typeLabel=data.kind==='command'?'STATE CORE':data.kind==='cluster'?'COMMAND BRANCH':data.kind==='agency'?'AGENCY':'DUTY CONTACT';
+      const statusLabel=data.kind==='person'?(data.presence==='online'?'AVAILABLE':data.presence==='radio'?'RADIO ONLY':'ESCALATE'):data.kind==='agency'?(data.collapsed?'COLLAPSED':'ON DUTY'):'OPERATIONAL';
+      return React.createElement('div',{className:`organization-flow-node ${data.kind} ${data.presence||''} ${data.highlighted?'highlighted':''}`},
+        data.kind!=='command'&&React.createElement(Handle,{type:'target',position:Position.Top}),
+        data.kind==='agency'&&React.createElement('span',{className:'organization-collapse',title:data.collapsed?'Expand branch':'Collapse branch'},data.collapsed?'+':'−'),
+        React.createElement('div',{className:'organization-node-main'},React.createElement('span',{className:'organization-node-icon'},data.badge||'TN'),React.createElement('div',null,React.createElement('span',{className:'organization-node-type'},typeLabel),React.createElement('strong',null,data.label),React.createElement('small',null,data.sub))),
+        React.createElement('div',{className:'organization-node-status'},React.createElement('span',null,'Status'),React.createElement('b',null,statusLabel)),
+        data.kind!=='person'&&React.createElement(Handle,{type:'source',position:Position.Bottom})
+      );
+    };
     const OrganizationFlow=()=>{
       const graph=organizationGraphData();
       const query=state.organizationQuery.toLowerCase();const agency=state.organizationAgency;
       const matchingIds=new Set(people.filter(person=>(agency==='All agencies'||person.agency===agency)&&`${person.name} ${person.role} ${person.unit} ${person.agency} ${person.zone}`.toLowerCase().includes(query)).map(person=>person.id));
       const filtering=Boolean(query)||agency!=='All agencies';
+      const revealIds=query?matchingIds:new Set();
       const selected=people.find(person=>person.id===state.organizationSelectedPerson);
       const activeAgency=selected?.agency;
-      const visibleNodes=graph.nodes.filter(node=>node.data.kind!=='person'||!state.organizationCollapsed.has(node.data.agency)||matchingIds.has(node.data.personId));
+      const visibleNodes=graph.nodes.filter(node=>node.data.kind!=='person'||!state.organizationCollapsed.has(node.data.agency)||revealIds.has(node.data.personId));
       const visibleIds=new Set(visibleNodes.map(node=>node.id));
-      const nodes=visibleNodes.map(node=>({...node,data:{...node.data,collapsed:node.data.kind==='agency'&&state.organizationCollapsed.has(node.data.agency),highlighted:node.data.personId===state.organizationSelectedPerson||matchingIds.has(node.data.personId)||(activeAgency&&node.data.agency===activeAgency&&node.data.kind==='agency')},className:filtering&&node.data.kind==='person'&&!matchingIds.has(node.data.personId)?'organization-dim':''}));
+      const nodes=visibleNodes.map(node=>({...node,data:{...node.data,collapsed:node.data.kind==='agency'&&state.organizationCollapsed.has(node.data.agency),highlighted:node.data.personId===state.organizationSelectedPerson||(filtering&&matchingIds.has(node.data.personId))||(activeAgency&&node.data.agency===activeAgency&&node.data.kind==='agency')},className:filtering&&node.data.kind==='person'&&!matchingIds.has(node.data.personId)?'organization-dim':''}));
       const edges=graph.edges.filter(edge=>visibleIds.has(edge.source)&&visibleIds.has(edge.target)).map(edge=>({...edge,animated:Boolean(activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())),style:{stroke:activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())?'#111111':'#b8b8b8',strokeWidth:activeAgency&&edge.id.includes(activeAgency.replace(/\W+/g,'-').toLowerCase())?2.5:1.2}}));
-      return React.createElement(ReactFlow,{nodes,edges,nodeTypes:{org:FlowNode},fitView:true,fitViewOptions:{padding:.16},minZoom:.38,maxZoom:1.8,nodesDraggable:true,nodesConnectable:false,elementsSelectable:true,onInit:instance=>{state.organizationFitView=()=>instance.fitView({padding:.16,duration:250});},onNodeClick:(_,node)=>{if(node.data.kind==='agency'){if(state.organizationCollapsed.has(node.data.agency))state.organizationCollapsed.delete(node.data.agency);else state.organizationCollapsed.add(node.data.agency);state.organizationRender?.();setTimeout(()=>state.organizationFitView?.(),30);return;}if(node.data.personId){state.organizationSelectedPerson=Number(node.data.personId);state.organizationRender?.();openPerson(Number(node.data.personId));}}},
+      return React.createElement(ReactFlow,{nodes,edges,nodeTypes:{org:FlowNode},fitView:true,fitViewOptions:{padding:.11,minZoom:.5},minZoom:.5,maxZoom:1.8,nodesDraggable:true,nodesConnectable:false,elementsSelectable:true,onInit:instance=>{state.organizationFitView=()=>instance.fitView({padding:.11,minZoom:.5,duration:250});},onNodeClick:(_,node)=>{if(node.data.kind==='agency'){if(state.organizationCollapsed.has(node.data.agency))state.organizationCollapsed.delete(node.data.agency);else state.organizationCollapsed.add(node.data.agency);state.organizationRender?.();setTimeout(()=>state.organizationFitView?.(),30);return;}if(node.data.personId){state.organizationSelectedPerson=Number(node.data.personId);state.organizationRender?.();openPerson(Number(node.data.personId));}}},
         React.createElement(Background,{variant:BackgroundVariant.Dots,gap:24,size:1,color:'#00000018'}),
         React.createElement(Controls,{showInteractive:false}),
-        React.createElement(MiniMap,{nodeColor:node=>node.data.kind==='command'?'#ffe600':node.data.kind==='agency'?'#111111':'#ffffff',maskColor:'#ffffffbb',pannable:true,zoomable:true})
+        React.createElement(MiniMap,{nodeColor:node=>node.data.kind==='command'||node.data.kind==='cluster'?'#ffe600':'#ffffff',maskColor:'#ffffffbb',pannable:true,zoomable:true})
       );
     };
     container.innerHTML='';state.organizationReactRoot=ReactDOM.createRoot(container);
@@ -399,7 +411,7 @@ function updateOrganizationSearch() {
   const matches=people.filter(person=>(agency==='All agencies'||person.agency===agency)&&`${person.name} ${person.role} ${person.unit} ${person.agency} ${person.zone}`.toLowerCase().includes(query));
   if(query)matches.forEach(person=>state.organizationCollapsed.delete(person.agency));
   const results=document.querySelector('#organizationResults');
-  if(results)results.innerHTML=`<header><b>${matches.length}</b><span>matching duty contacts</span></header>${matches.map(person=>`<button data-organization-person="${person.id}"><span class="avatar">${person.initials}</span><span><b>${person.name}</b><small>${person.role} · ${person.unit}</small></span><i class="presence ${person.presence}"></i></button>`).join('')||'<p>No matching duty contact</p>'}`;
+  if(results){results.hidden=!query&&agency==='All agencies';results.innerHTML=`<header><b>${matches.length}</b><span>matching duty contacts</span></header>${matches.map(person=>`<button data-organization-person="${person.id}"><span class="avatar">${person.initials}</span><span><b>${person.name}</b><small>${person.role} · ${person.unit}</small></span><i class="presence ${person.presence}"></i></button>`).join('')||'<p>No matching duty contact</p>'}`;}
   results?.querySelectorAll('[data-organization-person]').forEach(button=>button.onclick=()=>{const id=Number(button.dataset.organizationPerson);state.organizationSelectedPerson=id;highlightOrganizationPerson(id);openPerson(id);});
   state.organizationRender?.();
 }
