@@ -75,7 +75,7 @@ const conversations = {
     { from:'ERSS 112 · Call Taker 08', time:'14:30:03', text:'Multiple callers report a bus, lorry and car collision near Guindy flyover. The car has caught fire; persons may be trapped. Primary caller remains on line at a safe distance.' },
     { from:'ERSS 112 · Dispatcher Vignesh', time:'14:30:18', text:'CAD INC-0431 dispatched. Traffic Central, PRV-114, Fire TN-3 and two 108 ambulances assigned. NHAI road control and towing vendor notified. Dynamic group is primary coordination.' },
     { from:'Assisted Call Intake · Tamil caller', time:'14:30:20', text:'கிண்டி மேம்பாலம் அருகே வாகனங்கள் மோதியுள்ளன. ஒரு காரில் தீ உள்ளது. தயவுசெய்து உடனடியாக உதவி அனுப்புங்கள்.', translation:'Vehicles have collided near Guindy flyover. A car is on fire. Please send help immediately.', ai:true },
-    { from:'ERSS 112 · Dispatcher Vignesh', time:'14:30:24', text:'Caller location matched to GST Road at Guindy flyover. Fire and collision details verified against a second call. Tamil radio relay approved for South Zone DMR Channel 3.' },
+    { from:'ERSS 112 · Dispatcher Vignesh', time:'14:30:24', text:'Caller location matched to GST Road at Guindy flyover. Fire and collision details verified against a second call. Tamil radio relay queued for South Zone DMR Channel 3.' },
     { from:'Automated Radio Relay · South Zone DMR Ch-3', time:'14:30:31', type:'audio', duration:'0:08', audioText:'ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.', audioLang:'ta-IN', text:'ஒரு கார் தீப்பிடித்துள்ளது. ஆம்புலன்ஸ் மற்றும் தீயணைப்பு வாகனம் உடனடியாக தேவை.', translation:'A car is on fire. An ambulance and fire tender are required immediately.', ai:true },
     { from:'PRV-114 · DMR walkie-talkie', time:'14:30:37', text:'Relay received clearly on handheld radio. PRV-114 responding from Kathipara; ETA four minutes.' },
     { from:'SI M. Anitha · PRV-114 · first on scene', time:'14:34:28', type:'audio', duration:'0:11', audioText:'கிண்டி மேம்பாலம் அருகே மூன்று வாகனங்கள் மோதியுள்ளன. ஒரு கார் தீப்பிடித்துள்ளது. எரிபொருள் சாலையில் கசிகிறது. இரண்டாவது ஆம்புலன்ஸ் தேவை.', audioLang:'ta-IN', text:'கிண்டி மேம்பாலம் அருகே மூன்று வாகனங்கள் மோதியுள்ளன. ஒரு கார் தீப்பிடித்துள்ளது. எரிபொருள் சாலையில் கசிகிறது. இரண்டாவது ஆம்புலன்ஸ் தேவை.', translation:'Three vehicles have collided near Guindy flyover. One car is on fire. Fuel is leaking onto the road. A second ambulance is required.' },
@@ -87,7 +87,7 @@ const conversations = {
     { from:'ERSS 112 · Call Taker 08', time:'14:35:58', text:'Field picture received. Caller confirms the bus has been evacuated and is moving walking wounded toward the police cordon. I am keeping the caller away from the fuel spill.' },
     { from:'FIRE-TN-3 · SFO Prabhu', time:'14:36:22', text:'Fire knockdown started. Police, confirm all occupants are clear of the car. 108 may approach only from the north until we declare the hot zone safe.' },
     { from:'NHAI Road Control · Patrol 6', time:'14:36:50', text:'Portable barriers and spill-control vehicle dispatched. ETA six minutes. Recovery cranes are standing by outside the hot zone.' },
-    { from:'Automated Voice Relay', time:'14:37:40', type:'audio', duration:'0:14', audioText:'Automated UECP brief for the zonal Assistant Commissioner. A three vehicle collision with one vehicle fire has closed GST Road southbound near Guindy. Fire suppression, trauma triage and traffic diversion are active. Two red-priority patients are reported. Tap to join the incident group.', audioLang:'en-IN', text:'Dispatcher-approved voice brief queued to the unreachable zonal ACP. Source audio and field messages remain attached.', ai:true },
+    { from:'Automated Voice Relay', time:'14:37:40', type:'audio', duration:'0:14', audioText:'Automated UECP brief for the zonal Assistant Commissioner. A three vehicle collision with one vehicle fire has closed GST Road southbound near Guindy. Fire suppression, trauma triage and traffic diversion are active. Two red-priority patients are reported. Tap to join the incident group.', audioLang:'en-IN', text:'Dispatcher voice brief queued to the unreachable zonal ACP. Source audio and field messages remain attached.', ai:true },
     { from:'You · State Control', time:'14:38:14', text:'ICCC Camera G-24 and live diversion map added. Dispatch remains on the loop; field commanders continue direct cross-agency coordination.', mine:true },
     { from:'ICCC Camera G-24', time:'14:39:02', type:'file', file:'G24_collision_overview.jpg', detail:'Incident approach and traffic queue · 1.8 MB' }
   ],
@@ -112,6 +112,9 @@ const conversations = {
     { from:'ICCC Traffic Analytics', time:'13:55:12', text:'Congestion index reduced from 0.86 to 0.61 after diversion.', ai:true }
   ]
 };
+
+let archivedFireConversation = conversations.fire.slice();
+conversations.fire = [];
 
 const state = {
   view: location.hash.slice(1) || 'overview',
@@ -143,6 +146,8 @@ const state = {
   agentStreamRunning: false,
   agentStreamAbort: null,
   liveAudio: {},
+  showArchivedChat: false,
+  liveIncidentStarted: false,
   translationStarting: false,
   translationSetupReceived: false,
   translationPcmPending: new Int16Array(0),
@@ -438,29 +443,38 @@ function renderIncidents() {
 
 function renderComms() {
   const channel = channels.find(c=>c.id===state.selectedChannel) || channels[0];
-  const messages = conversations[channel.id] || [];
-  return `<section class="view"><div class="view-head"><div><p class="eyebrow">VOICE · PTT · CHAT · FILES</p><h2>Unified communications</h2><p>Sample operational conversations show officers how radio, app, SIP and translated messages converge in one incident record.</p></div><div class="view-actions"><button class="button secondary" data-action="new-group">${icon('users')} New group</button></div></div>
+  const messages = channel.id==='fire' ? currentFireConversation() : (conversations[channel.id] || []);
+  const streamContent = channel.id==='fire' && messages.length===0 ? liveIncidentEmptyState() : messages.map(messageMarkup).join('');
+  return `<section class="view"><div class="view-head"><div><p class="eyebrow">VOICE · PTT · CHAT · FILES</p><h2>Unified communications</h2><p>Start a new incident stream or open the archived sample to explore cross-agency voice, chat and dispatch coordination.</p></div><div class="view-actions"><button class="button secondary" data-action="new-group">${icon('users')} New group</button></div></div>
     <div class="comms-layout"><aside class="channel-list"><div class="channel-search"><input class="text-input" placeholder="Search channels"></div>${channels.map(c=>`<button class="channel-item ${c.id===channel.id?'active':''}" data-channel="${c.id}"><span class="channel-icon">${icon(c.icon)}</span><div><strong>${c.name}</strong><small>${c.meta}</small></div><time>${c.time}</time></button>`).join('')}</aside>
-      <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header>${channel.id==='fire'?liveResponsePanel():''}<div class="message-stream" id="messageStream">${messages.map(messageMarkup).join('')}</div><div class="composer"><div class="mention-picker" id="mentionPicker" hidden></div><button class="icon-button mention-trigger" data-action="mention-trigger" aria-label="Mention a person or unit">@</button><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group · type @ to find anyone"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
+      <section class="conversation"><header class="conversation-head"><span class="channel-icon">${icon(channel.icon)}</span><div><h3>${channel.name}</h3><p>${channel.meta} · messages retained under incident policy</p></div><button class="icon-button" data-action="call" aria-label="Start call">${icon('phone')}</button><button class="icon-button" data-action="channel-info" aria-label="Channel information">${icon('users')}</button></header>${channel.id==='fire'?liveResponsePanel():''}<div class="message-stream" id="messageStream">${streamContent}</div><div class="composer"><div class="mention-picker" id="mentionPicker" hidden></div><button class="icon-button mention-trigger" data-action="mention-trigger" aria-label="Mention a person or unit">@</button><button class="icon-button" data-action="upload" aria-label="Attach a file">${icon('file')}</button><input id="messageInput" placeholder="Message this group · type @ to find anyone"><button class="ptt-button" id="pttButton">${icon('mic',13)} Hold to talk</button><button class="button primary" data-action="send-message" aria-label="Send message">${icon('send')}</button></div></section>
     </div></section>`;
 }
 
 function liveResponsePanel() {
-  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse"></span><div><b>SPONTANEOUS RESPONSE STREAM</b><small id="agentRunStatus">${state.agentStreamRunning?'A live run is deciding the next coordination step':'Ready · current incident context will be read at run time'}</small></div></div><div class="live-response-mix"><span>70% தமிழ்</span><span>30% English</span><span>Fresh radio audio</span></div><button class="button ${state.agentStreamRunning?'dark':'primary'}" data-action="${state.agentStreamRunning?'stop-agent-stream':'start-agent-stream'}" id="agentStreamButton">${state.agentStreamRunning?`${icon('x',13)} Stop run`:`${icon('activity',13)} Start live run`}</button></section>`;
+  const archiveAction=state.showArchivedChat?'return-live-session':'show-archived-chat';
+  const archiveLabel=state.showArchivedChat?'Return to live session':'Archived sample';
+  return `<section class="live-response-panel"><div class="live-response-copy"><span class="live-response-pulse ${state.agentStreamRunning?'active':''}"></span><div><b>${state.showArchivedChat?'ARCHIVED INCIDENT SAMPLE':'NEW LIVE INCIDENT'}</b><small id="agentRunStatus">${state.showArchivedChat?'Recorded sample · live generation is paused':state.agentStreamRunning?'Incident coordination is continuing until you stop it':'Ready · a new session begins with a verified camera alert'}</small></div></div><div class="live-response-actions"><button class="button secondary compact" data-action="${archiveAction}">${archiveLabel}</button><button class="button ${state.agentStreamRunning?'dark':'primary'}" data-action="${state.agentStreamRunning?'stop-agent-stream':'start-agent-stream'}" id="agentStreamButton">${state.agentStreamRunning?`${icon('x',13)} Stop`:`${icon('activity',13)} Start new live incident`}</button></div></section>`;
+}
+
+function currentFireConversation(){return state.showArchivedChat?archivedFireConversation:conversations.fire;}
+
+function liveIncidentEmptyState(){
+  return `<div class="live-incident-empty"><span class="live-empty-icon">${icon('activity',22)}</span><div><b>NO ACTIVE LIVE SESSION</b><h3>Start with a new ICCC camera alert</h3><p>The stream will begin from zero, then continue with new cross-agency messages and radio voice until you stop it.</p></div><button class="button primary" data-action="start-agent-stream">Start new live incident</button></div>`;
 }
 
 function messageMarkup(m) {
   let body = escapeHtml(m.text || '');
   (m.mentions||[]).forEach(id=>{const person=people.find(item=>item.id===id);if(person)body=body.replaceAll(`@${escapeHtml(person.name)}`,`<button class="mention-token" data-person="${person.id}">@${escapeHtml(person.name)}</button>`);});
-  if (m.type === 'api') body = `<div class="api-source-head"><b>JSON EVENT RECEIVED</b><span>operator verification required</span></div><pre class="api-event">${escapeHtml(JSON.stringify(m.apiPayload,null,2))}</pre>`;
+  if (m.type === 'incident-source') body = `<div class="incident-source-card"><div class="incident-source-title"><span>${icon('camera',18)}</span><div><b>ICCC CAMERA ALERT</b><strong>${escapeHtml(m.sourceTitle||'Vehicle collision detected')}</strong></div><span class="status-tag live">NEW</span></div><p>${escapeHtml(m.text||'')}</p><div class="incident-source-facts"><span><b>${escapeHtml(m.camera||'CAM-G24')}</b>Camera</span><span><b>${escapeHtml(m.location||'Guindy flyover')}</b>Location</span><span><b>${escapeHtml(m.confidence||'High')}</b>Confidence</span></div><small>Operator verification required · dispatch loop notified</small></div>`;
   if (m.type === 'audio') {
     const audioAction=m.audioKey?`data-action="play-live-audio" data-audio-key="${escapeHtml(m.audioKey)}"`:`data-action="play-sample" data-audio-sample="${sampleIdForMessage(m)}" data-audio-text="${escapeHtml(m.audioText || m.text)}" data-audio-lang="${m.audioLang || 'en-IN'}"`;
-    body = `<div class="audio-bubble"><button ${audioAction} aria-label="Play ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} radio update">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration||'NEW'}</b></div><small class="audio-model">${m.agentGenerated?'Generated now · fresh operational voice':`Approved ${m.audioLang?.startsWith('ta') ? 'Tamil' : 'English'} operational voice`}</small><div style="margin-top:9px">${escapeHtml(m.text||'')}</div>`;
+    body = `<div class="audio-bubble"><button ${audioAction} aria-label="Play radio update">${icon('play',12)}</button><div class="wave">${[35,60,25,85,44,70,32,90,55,38,66,27,78,50,31].map(h=>`<i style="height:${h}%"></i>`).join('')}</div><b>${m.duration||'NEW'}</b></div><small class="audio-model">Radio voice · tap to play</small><div style="margin-top:9px">${escapeHtml(m.text||'')}</div>`;
   }
   if (m.type === 'file') body = `<div class="audio-bubble">${icon('camera',22)}<div><strong>${m.file}</strong><br><small>${m.detail}</small></div></div>`;
   if(m.voicePending)body+=`<div class="voice-rendering"><i></i> Fresh radio voice is rendering</div>`;
-  const tag=m.agentGenerated?'<span class="status-tag live">LIVE AGENT</span>':m.ai?'<span class="status-tag live">SYSTEM</span>':'';
-  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${escapeHtml(m.from)}</b><time>${escapeHtml(m.time)}</time>${tag}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${escapeHtml(m.translationModel||'Live translation')} · source → English</b>${escapeHtml(m.translation)}</div>`:''}${m.agentGenerated&&m.rationale?`<small class="agent-rationale">WHY NEXT · ${escapeHtml(m.rationale)}</small>`:''}</div></article>`;
+  const tag=m.agentGenerated?'<span class="status-tag live">LIVE</span>':m.ai?'<span class="status-tag live">SYSTEM</span>':'';
+  return `<article class="message ${m.mine?'mine':''}"><div class="message-meta"><b>${escapeHtml(m.from)}</b><time>${escapeHtml(m.time)}</time>${tag}</div><div class="bubble">${body}${m.translation?`<div class="translation"><b>${escapeHtml(m.translationModel||'Live translation')} · source → English</b>${escapeHtml(m.translation)}</div>`:''}</div></article>`;
 }
 
 function sampleIdForMessage(message) {
@@ -480,7 +494,7 @@ function renderTranslate() {
     <div class="translate-layout"><section class="translate-console"><div class="translate-hero"><div><p class="eyebrow">LIVE INTERPRETER</p><h3>Speak naturally. Hear the translation.</h3><p>Continuous audio translation · source and output transcripts retained with consent</p></div><span class="model-chip">Live multilingual audio</span></div><div class="language-route"><label>Input language<select id="sourceLanguage"><option value="auto">Auto-detect</option>${languages.map(([c,n])=>`<option value="${c}">${n}</option>`).join('')}</select></label><span class="route-arrow">${icon('languages')}</span><label>Translate into<select id="targetLanguage">${languages.map(([c,n])=>`<option value="${c}" ${c===target?'selected':''}>${n}</option>`).join('')}</select></label></div>
       <div class="transcript-stage"><section class="transcript-card"><header><span>Source transcript</span><span id="inputLanguageCode">AUTO</span></header><div class="transcript-copy ${state.transcriptIn?'':'transcript-placeholder'}" id="inputTranscript">${state.transcriptIn || 'Source speech will appear here as the radio or officer speaks…'}</div><footer class="transcript-foot"><span>16 kHz PCM input</span><span id="inputConfidence">waiting</span></footer></section><section class="transcript-card"><header><span>Translated transcript</span><span id="outputLanguageCode">${target.toUpperCase()}</span></header><div class="transcript-copy ${state.transcriptOut?'':'transcript-placeholder'}" id="outputTranscript">${state.transcriptOut || 'The translated transcript will appear here and audio will play automatically…'}</div><footer class="transcript-foot"><span>24 kHz PCM output</span><span id="outputState">waiting</span></footer></section></div>
       <div class="translate-controls"><button class="mic-button ${state.translating?'active':''}" id="translateMic" aria-label="${state.translating?'Stop':'Start'} live translation">${icon(state.translating?'x':'mic')}</button><div class="session-state"><strong id="sessionStatus">${state.translating?'Live translation active':'Ready to translate'}</strong><small id="sessionDetail">${state.translating?'Listening for speech':'Select a target language, then start'}</small></div><button class="button secondary" data-action="load-translation-demo">Play sample flow</button></div></section>
-      <aside class="settings-panel"><div class="panel-head"><div><h3>Secure gateway</h3><p>Provider credentials remain server-side</p></div>${icon('shield')}</div><div class="settings-body"><label>Cloudflare Worker URL<input id="workerUrl" value="${workerUrl}" placeholder="https://uecp-secure-gateway.workers.dev"></label><button class="button secondary connection-test" data-action="test-worker">${icon('activity')} Test connection</button><div class="privacy-note">${icon('lock')} GitHub Pages never receives provider credentials. The Worker validates the origin, rate-limits sessions and enforces approved audio capabilities.</div><div class="mini-stat-grid"><div class="mini-stat"><span>Recorded audio</span><b>Transcription</b></div><div class="mini-stat"><span>Live audio</span><b>Translation</b></div><div class="mini-stat"><span>Input</span><b>16 kHz</b></div><div class="mini-stat"><span>Output</span><b>24 kHz</b></div></div><label><input type="checkbox" id="echoLanguage" style="width:auto;height:auto;margin:0 6px 0 0" checked> Echo speech already in target language</label><button class="button dark" data-action="save-worker">Save gateway settings</button></div></aside>
+      <aside class="settings-panel"><div class="panel-head"><div><h3>Secure gateway</h3><p>Provider credentials remain server-side</p></div>${icon('shield')}</div><div class="settings-body"><label>Cloudflare Worker URL<input id="workerUrl" value="${workerUrl}" placeholder="https://uecp-secure-gateway.workers.dev"></label><button class="button secondary connection-test" data-action="test-worker">${icon('activity')} Test connection</button><div class="privacy-note">${icon('lock')} GitHub Pages never receives provider credentials. The Worker validates the origin, rate-limits sessions and enforces configured audio capabilities.</div><div class="mini-stat-grid"><div class="mini-stat"><span>Recorded audio</span><b>Transcription</b></div><div class="mini-stat"><span>Live audio</span><b>Translation</b></div><div class="mini-stat"><span>Input</span><b>16 kHz</b></div><div class="mini-stat"><span>Output</span><b>24 kHz</b></div></div><label><input type="checkbox" id="echoLanguage" style="width:auto;height:auto;margin:0 6px 0 0" checked> Echo speech already in target language</label><button class="button dark" data-action="save-worker">Save gateway settings</button></div></aside>
     </div></section>`;
 }
 
@@ -500,7 +514,7 @@ function renderAudit() {
   const rows = [
     ['14:49:12','Command brief regenerated','INC-0431','ADGP A. Karthik','a8f7…90c2','Verified'],
     ['14:47:26','Patient status received','AMB-2291','Dr. S. Lakshmi','b112…7dd9','Ingested'],
-    ['14:43:05','Bot relay approved','FIRE DMR Ch-3','Dispatcher Vignesh','cc84…02e1','Approved'],
+    ['14:43:05','Radio relay logged','FIRE DMR Ch-3','Dispatcher Vignesh','cc84…02e1','Logged'],
     ['14:39:02','Camera snapshot attached','ICCC CAM-17','System adapter','348e…fb16','Ingested'],
     ['14:36:42','Tamil radio translated','FIRE-TN-3','Secure language gateway','714a…aec4','Automated'],
     ['14:31:02','Radio bridge opened','DMR Ch-3','SFO K. Prabhu','4df0…a229','Authorized'],
@@ -562,6 +576,8 @@ function handleAction(action, button) {
     'load-translation-demo': loadTranslationDemo,
     'start-agent-stream': startIncidentStream,
     'stop-agent-stream': stopIncidentStream,
+    'show-archived-chat': showArchivedChat,
+    'return-live-session': returnToLiveSession,
     'play-live-audio': () => playLiveAudio(button),
     'refresh-brief': () => refreshBrief(button),
     'export-sitrep': () => downloadText('UECP_SITREP_INC-0431.txt', 'UECP SITUATION REPORT\nINC-0431 · Multi-vehicle collision with vehicle fire\nLocation: GST Road near Guindy flyover\nStatus: Live\nFire suppression, traffic diversion and trauma triage active. Two red-priority patients reported.\nGenerated: '+new Date().toLocaleString('en-IN')),
@@ -705,8 +721,14 @@ async function testWorker() {
 
 async function startIncidentStream() {
   if(state.agentStreamRunning)return;
+  state.showArchivedChat=false;
+  state.liveIncidentStarted=true;
+  Object.values(state.liveAudio).forEach(value=>URL.revokeObjectURL(value));
+  state.liveAudio={};
+  conversations.fire=[];
   state.agentStreamRunning=true;
   state.agentStreamAbort=new AbortController();
+  renderConversationMessages();
   updateAgentRunUi('Connecting to the incident context stream…',true);
   const url=(localStorage.getItem('uecpWorkerUrl')||DEFAULT_WORKER_URL).replace(/\/$/,'');
   try {
@@ -717,13 +739,21 @@ async function startIncidentStream() {
     if(error.name!=='AbortError'){updateAgentRunUi(`Run stopped · ${error.message}`,false);toast(`Live response run failed · ${error.message}`);}
   } finally {
     state.agentStreamRunning=false;state.agentStreamAbort=null;
-    const button=document.querySelector('#agentStreamButton');if(button){button.dataset.action='start-agent-stream';button.className='button primary';button.innerHTML=`${icon('activity',13)} Start another run`;button.onclick=()=>handleAction('start-agent-stream',button);}
+    const button=document.querySelector('#agentStreamButton');if(button){button.dataset.action='start-agent-stream';button.className='button primary';button.innerHTML=`${icon('activity',13)} Start new live incident`;button.onclick=()=>handleAction('start-agent-stream',button);}
   }
 }
 
 function stopIncidentStream() {
   state.agentStreamAbort?.abort();state.agentStreamRunning=false;updateAgentRunUi('Run stopped by operator',false);
 }
+
+function showArchivedChat(){
+  if(state.agentStreamRunning)stopIncidentStream();
+  state.showArchivedChat=true;
+  render();
+}
+
+function returnToLiveSession(){state.showArchivedChat=false;render();}
 
 async function consumeEventStream(response,onEvent) {
   if(!response.body)throw new Error('streaming response body unavailable');
@@ -739,11 +769,12 @@ async function consumeEventStream(response,onEvent) {
 async function handleIncidentStreamEvent(event,payload) {
   if(event==='status'){updateAgentRunUi(payload.label||'Live run active',true);return;}
   if(event==='source'){
-    conversations.fire.push({id:`${payload.runId}-source`,from:'ICCC Video Analytics API · CAM-G24',time:currentChennaiTime(),type:'api',apiPayload:payload.payload,agentGenerated:true,text:'Machine-readable source event'});
-    renderConversationMessages();updateAgentRunUi('ICCC JSON received · selecting the first coordination action',true);return;
+    const source=payload.payload||{};const collision=source.detections?.find(item=>item.type==='multi_vehicle_collision');
+    conversations.fire.push({id:`${payload.runId}-source`,from:'ICCC Video Analytics · Camera G-24',time:currentChennaiTime(),type:'incident-source',agentGenerated:true,sourceTitle:'Probable collision with vehicle fire',camera:source.camera?.id||'CAM-G24',location:source.location?.label||'GST Road · Guindy flyover',confidence:collision?.confidence?`${Math.round(collision.confidence*100)}%`:'High',text:source.summary||'A probable multi-vehicle collision and visible fire have been detected on the southbound carriageway.'});
+    renderConversationMessages();updateAgentRunUi('Camera alert received · dispatch coordination has started',true);return;
   }
   if(event==='message'){
-    conversations.fire.push({id:payload.id,from:`${payload.speakerName} · ${payload.unit}`,time:currentChennaiTime(),text:payload.message,translation:payload.languageCode==='ta-IN'?payload.englishTranslation:'',translationModel:'Generated translation',audioLang:payload.languageCode,voicePending:payload.voiceRequired,agentGenerated:true,rationale:payload.rationale,channel:payload.channel});
+    conversations.fire.push({id:payload.id,from:`${payload.speakerName} · ${payload.unit}`,time:currentChennaiTime(),text:payload.message,translation:payload.languageCode==='ta-IN'?payload.englishTranslation:'',translationModel:'Live translation',audioLang:payload.languageCode,voicePending:payload.voiceRequired,agentGenerated:true,channel:payload.channel});
     renderConversationMessages();updateAgentRunUi(`${payload.unit} update received · conversation context advanced`,true);return;
   }
   if(event==='audio'){
@@ -755,13 +786,13 @@ async function handleIncidentStreamEvent(event,payload) {
     const message=conversations.fire.find(item=>item.id===payload.messageId);if(message)message.voicePending=false;
     renderConversationMessages();updateAgentRunUi('One voice relay was unavailable · live text coordination continues',true);return;
   }
-  if(event==='complete'){updateAgentRunUi(`Run complete · ${payload.count} context-aware updates · ${payload.voiced} fresh voice relays`,false);toast('Spontaneous response run completed');return;}
+  if(event==='complete'){updateAgentRunUi('Incident stream ended',false);return;}
   if(event==='stream-error')throw new Error(payload.error||'live stream failed');
 }
 
 function renderConversationMessages() {
   if(state.selectedChannel!=='fire')return;const stream=document.querySelector('#messageStream');if(!stream)return;
-  stream.innerHTML=conversations.fire.map(messageMarkup).join('');
+  const messages=currentFireConversation();stream.innerHTML=messages.length?messages.map(messageMarkup).join(''):liveIncidentEmptyState();
   stream.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>handleAction(button.dataset.action,button));
   stream.querySelectorAll('[data-person]').forEach(button=>button.onclick=()=>openPerson(Number(button.dataset.person)));
   stream.scrollTop=stream.scrollHeight;
@@ -870,7 +901,7 @@ async function playSyntheticSample(button) {
     const localAudio=new Audio(localSource);
     let fallbackStarted=false;
     const fallback=()=>{if(fallbackStarted)return;fallbackStarted=true;playGeneratedSample(button);};
-    localAudio.onended=()=>finishSample(button,'Approved operational voice sample complete');
+    localAudio.onended=()=>finishSample(button,'Operational voice sample complete');
     localAudio.onerror=fallback;
     try { await localAudio.play(); return; } catch { fallback(); return; }
   }
@@ -884,7 +915,7 @@ async function playGeneratedSample(button) {
     if(!response.ok)throw new Error('Generated audio unavailable');
     const audioUrl=URL.createObjectURL(await response.blob());
     const audio=new Audio(audioUrl);
-    audio.onended=()=>{URL.revokeObjectURL(audioUrl);finishSample(button,'Generated operational voice sample complete');};
+    audio.onended=()=>{URL.revokeObjectURL(audioUrl);finishSample(button,'Operational voice sample complete');};
     audio.onerror=()=>{URL.revokeObjectURL(audioUrl);playBrowserVoice(button);};
     await audio.play();
   } catch {
@@ -932,7 +963,7 @@ async function loadIncidentDatabase() {
       age: incident.status === 'Live' ? 'Live now' : 'Monitoring',
       responders: incident.responder_count
     }));
-    conversations.fire = detailData.messages.map(message => ({
+    archivedFireConversation = detailData.messages.map(message => ({
       from: message.source_name,
       time: new Date(message.sent_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Kolkata'}),
       type: message.message_type,

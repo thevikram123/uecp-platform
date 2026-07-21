@@ -91,7 +91,7 @@ export default {
       }
 
       if (isIncidentStream) {
-        return await streamIncidentResponse(url, env, cors, geminiApiKey, ctx);
+        return await streamIncidentResponse(url, env, cors, geminiApiKey, ctx, request.signal);
       }
 
       if (isTts) {
@@ -403,7 +403,7 @@ async function openLiveTranslation(request, env, geminiApiKey) {
   return new Response(null, { status: 101, webSocket: client });
 }
 
-function streamIncidentResponse(url, env, cors, geminiApiKey, ctx) {
+function streamIncidentResponse(url, env, cors, geminiApiKey, ctx, signal) {
   const incidentId = clean(url.searchParams.get('incidentId') || 'INC-0431', 40);
   if (!/^INC-[A-Z0-9-]+$/.test(incidentId)) return json({ error: 'invalid incident id' }, 400, cors);
   const encoder = new TextEncoder();
@@ -430,7 +430,7 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, ctx) {
       const videoAnalyticsEvent = createIcccVideoAnalyticsEvent(incident);
       await send('status', { runId, stage: 'context', label: 'Incident context loaded', incidentId });
       await send('source', { runId, source: 'ICCC Video Analytics API', payload: videoAnalyticsEvent });
-      for (let turn = 0; turn < 4; turn += 1) {
+      for (let turn = 0; !signal?.aborted; turn += 1) {
         await send('status', { runId, stage: 'thinking', label: `Choosing operational update ${turn + 1}`, turn: turn + 1 });
         const desiredLanguage = chooseWeightedLanguage(turn, generated);
         const update = await chooseNextIncidentUpdate({
@@ -448,7 +448,7 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, ctx) {
         });
         update.id = `${runId}-${turn + 1}`;
         update.turn = turn + 1;
-        if (update.voiceRequired && generated.filter(item => item.voiceRequired).length >= 2) update.voiceRequired = false;
+        update.voiceRequired = shouldCreateVoice(turn, generated, update.voiceRequired);
         generated.push(update);
         await send('message', update);
         if (update.voiceRequired) {
@@ -462,9 +462,11 @@ function streamIncidentResponse(url, env, cors, geminiApiKey, ctx) {
             await send('voice-error', { runId, messageId: update.id, error: 'Fresh radio voice was unavailable; live text coordination continues.' });
           }
         }
+        await waitForNextTurn(1400, signal);
       }
-      await send('complete', { runId, count: generated.length, voiced: generated.filter(item => item.voiceRequired).length });
+      if (!signal?.aborted) await send('complete', { runId });
     } catch (error) {
+      if (signal?.aborted) return;
       console.error(JSON.stringify({ message: 'incident stream failed', runId, error: error instanceof Error ? error.message : String(error) }));
       try { await send('stream-error', { runId, error: 'The live response run could not be completed. Please retry.' }); } catch {}
     } finally {
@@ -493,14 +495,14 @@ async function chooseNextIncidentUpdate({ incident, recentMessages, tasks, resou
     'Use only the incident facts below. Do not invent new casualties, measurements, arrival confirmations, fire status, or verified observations.',
     'You may issue a request, acknowledgement, handoff, safety reminder, verification request, or status synthesis grounded in known facts.',
     'If mentioning an unresolved fact, label it unverified or request confirmation.',
-    'The service applies a 70% Tamil / 30% English operational language mix while ensuring both languages appear in a run.',
+    'Use Tamil most often and English when it is operationally natural. Ensure both languages appear early in the session.',
     `For this turn, write the spoken message in ${desiredLanguage === 'ta-IN' ? 'Tamil (ta-IN)' : 'English (en-IN)'} and set languageCode accordingly.`,
-    'Set voiceRequired true only for a concise update that should also be relayed over radio. At most two updates in the run should request voice.',
+    'Set voiceRequired true only for a concise update that would realistically be relayed over radio. Voice and text turns will continue throughout the session.',
     'Choose a realistic Chennai stakeholder and callsign. Do not call yourself an AI and do not mention model providers.',
     turn === 0
       ? 'This is the opening coordination message. Base it primarily on the ICCC Video Analytics API event and initiate the appropriate dispatch/verification loop.'
       : 'Read every update already generated in this run. Your next message must respond to the full conversation state up to this exact turn and must not repeat an earlier update.',
-    `This is turn ${turn + 1} of 4. Run entropy: ${runId}. Current Chennai time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
+    `This is continuous-session turn ${turn + 1}. Run entropy: ${runId}. Current Chennai time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
     '',
     `INCIDENT: ${JSON.stringify(incident)}`,
     `ICCC VIDEO ANALYTICS API EVENT: ${JSON.stringify(videoAnalyticsEvent)}`,
@@ -598,6 +600,25 @@ function chooseWeightedLanguage(turn, generated) {
   const draw = new Uint32Array(1);
   crypto.getRandomValues(draw);
   return draw[0] / 0xffffffff < 0.7 ? 'ta-IN' : 'en-IN';
+}
+
+function shouldCreateVoice(turn, generated, requested) {
+  if (turn === 0) return true;
+  const previous = generated.at(-1)?.voiceRequired;
+  const previousTwoAreText = generated.length >= 2 && generated.slice(-2).every(item => !item.voiceRequired);
+  if (previousTwoAreText) return true;
+  if (previous) return false;
+  const draw = new Uint32Array(1);
+  crypto.getRandomValues(draw);
+  return requested || draw[0] / 0xffffffff < 0.55;
+}
+
+function waitForNextTurn(milliseconds, signal) {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
 }
 
 async function createSpontaneousVoice(update, env, geminiApiKey) {
